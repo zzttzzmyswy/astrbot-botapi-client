@@ -114,57 +114,134 @@ class BotApiHttp {
     }
   }
 
-  /// 上传文件。返回 (result, error):成功 error=null;失败 result=null 并附原因
-  /// (413=服务端 nginx 拒绝大文件,超时,等),便于 UI 给用户明确提示。
+  /// 上传文件。>10MB 走分块(每块 5MB,绕过服务端 ~90s 请求超时),否则单次。
+  /// 返回 (result, error),失败附原因(413/超时等)供 UI 提示。
   Future<({UploadResult? result, String? error})> uploadFile(
       File file, String contentType,
       {void Function(int sent, int total)? onProgress}) async {
+    final size = await file.length();
+    const threshold = 10 * 1024 * 1024; // 10MB
+    if (size > threshold) {
+      return _uploadChunked(file, contentType, size, onProgress);
+    }
+    return _uploadSingle(file, contentType, onProgress);
+  }
+
+  String _uploadError(DioException e) {
+    final sc = e.response?.statusCode;
+    if (sc == 413) {
+      return '文件过大,服务端拒绝(413)。需在服务器 nginx 配置 '
+          'client_max_body_size(如 200m)并 reload。';
+    }
+    if (e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout) {
+      return '上传超时,网络过慢或文件过大';
+    }
+    return '上传失败: ${e.type.name}';
+  }
+
+  UploadResult _resultFrom(Map m) => UploadResult(
+        fileId: m['file_id'] as String,
+        name: m['name'] as String,
+        mimeType: (m['mime_type'] as String?) ?? 'application/octet-stream',
+        size: (m['size'] as num).toInt(),
+      );
+
+  Future<({UploadResult? result, String? error})> _uploadSingle(
+      File file, String contentType,
+      void Function(int, int)? onProgress) async {
+    final dio = Dio(BaseOptions(
+      baseUrl: _base,
+      connectTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(minutes: 5),
+      receiveTimeout: const Duration(minutes: 2),
+    ));
     try {
       final filename = file.path.split('/').last;
-      final dio = Dio(BaseOptions(
-        baseUrl: _base,
-        connectTimeout: const Duration(seconds: 15),
-        // 大文件 + 服务端处理慢(接收 body 后保存/反压)需足够长的发送与接收时限。
-        // sendTimeout 覆盖发送请求体(含服务端反压导致的发送停滞);receiveTimeout
-        // 覆盖服务端处理完返回响应。各 30/10 min 覆盖慢网络与大文件场景。
-        sendTimeout: const Duration(minutes: 30),
-        receiveTimeout: const Duration(minutes: 10),
-      ));
       final form = FormData.fromMap({
         'file': await MultipartFile.fromFile(file.path,
             filename: filename, contentType: MediaType.parse(contentType)),
       });
       final res = await dio.post('/upload',
-          data: form, options: Options(headers: _authHeaders), onSendProgress: onProgress);
+          data: form,
+          options: Options(headers: _authHeaders),
+          onSendProgress: onProgress);
       if (res.statusCode == 200 && res.data is Map) {
-        final m = res.data as Map<String, dynamic>;
-        return (
-          result: UploadResult(
-            fileId: m['file_id'] as String,
-            name: m['name'] as String,
-            mimeType: (m['mime_type'] as String?) ?? 'application/octet-stream',
-            size: (m['size'] as num).toInt(),
-          ),
-          error: null,
-        );
+        return (result: _resultFrom(res.data as Map), error: null);
       }
       return (result: null, error: '上传失败: HTTP ${res.statusCode}');
     } on DioException catch (e) {
-      final sc = e.response?.statusCode;
-      if (sc == 413) {
-        return (
-          result: null,
-          error: '文件过大,服务端拒绝(413)。需在服务器 nginx 配置 '
-              'client_max_body_size(如 200m)并 reload。'
-        );
-      }
-      if (e.type == DioExceptionType.sendTimeout ||
-          e.type == DioExceptionType.connectionTimeout) {
-        return (result: null, error: '上传超时,网络过慢或文件过大');
-      }
-      return (result: null, error: '上传失败: ${e.type.name}');
+      return (result: null, error: _uploadError(e));
     } catch (e) {
       return (result: null, error: '上传失败: $e');
+    } finally {
+      dio.close();
+    }
+  }
+
+  /// 分块上传:5MB/块,逐块 POST /upload/chunk,最后 /upload/complete 合并。
+  /// 每块远小于服务端 ~90s 请求超时,绕过单次大文件 408。
+  Future<({UploadResult? result, String? error})> _uploadChunked(
+      File file, String contentType, int total,
+      void Function(int, int)? onProgress) async {
+    final dio = Dio(BaseOptions(
+      baseUrl: _base,
+      connectTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(minutes: 5),
+      receiveTimeout: const Duration(minutes: 2),
+    ));
+    try {
+      final filename = file.path.split('/').last;
+      final uploadId =
+          '${DateTime.now().millisecondsSinceEpoch}_${filename.hashCode.abs()}';
+      const chunkSize = 5 * 1024 * 1024; // 5MB
+      final raf = await file.open();
+      int offset = 0;
+      try {
+        while (offset < total) {
+          final remaining = total - offset;
+          final thisLen = remaining > chunkSize ? chunkSize : remaining;
+          final bytes = await raf.read(thisLen);
+          final form = FormData.fromMap({
+            'upload_id': uploadId,
+            'offset': '$offset',
+            'file': MultipartFile.fromBytes(bytes,
+                filename: 'chunk', contentType: MediaType.parse(contentType)),
+          });
+          final res = await dio.post('/upload/chunk',
+              data: form,
+              options: Options(headers: _authHeaders),
+              onSendProgress: (s, t) {
+                if (onProgress != null) onProgress(offset + s, total);
+              });
+          if (res.statusCode != 200) {
+            return (result: null, error: '块上传失败: HTTP ${res.statusCode}');
+          }
+          offset += bytes.length;
+          if (onProgress != null) onProgress(offset, total);
+        }
+      } finally {
+        await raf.close();
+      }
+      final res = await dio.post('/upload/complete',
+          data: {
+            'upload_id': uploadId,
+            'filename': filename,
+            'mime_type': contentType,
+          },
+          options: Options(
+              headers: {..._authHeaders, 'Content-Type': 'application/json'}));
+      if (res.statusCode == 200 && res.data is Map) {
+        return (result: _resultFrom(res.data as Map), error: null);
+      }
+      return (result: null, error: '合并失败: HTTP ${res.statusCode}');
+    } on DioException catch (e) {
+      return (result: null, error: _uploadError(e));
+    } catch (e) {
+      return (result: null, error: '上传失败: $e');
+    } finally {
+      dio.close();
     }
   }
 
