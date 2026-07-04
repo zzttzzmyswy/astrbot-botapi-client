@@ -124,11 +124,11 @@ class BotApiHttp {
       final dio = Dio(BaseOptions(
         baseUrl: _base,
         connectTimeout: const Duration(seconds: 15),
-        // sendTimeout 是发送请求体的整体时限;50MB 在移动网络下 120s 常不够,
-        // 放宽到 10min 覆盖慢网络。MultipartFile.fromFile 本身是流式读文件,
-        // 不会把整文件读入内存。
-        sendTimeout: const Duration(minutes: 10),
-        receiveTimeout: const Duration(seconds: 60),
+        // 大文件 + 服务端处理慢(接收 body 后保存/反压)需足够长的发送与接收时限。
+        // sendTimeout 覆盖发送请求体(含服务端反压导致的发送停滞);receiveTimeout
+        // 覆盖服务端处理完返回响应。各 30/10 min 覆盖慢网络与大文件场景。
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 10),
       ));
       final form = FormData.fromMap({
         'file': await MultipartFile.fromFile(file.path,
