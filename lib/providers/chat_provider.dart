@@ -420,14 +420,14 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     }
   }
 
-  /// 上传媒体文件，返回 file_id 或 null。UI 调用。
-  Future<String?> uploadMedia(File file, String mime,
+  /// 上传媒体文件,返回 (fileId, error)。UI 据失败原因弹具体提示(如 413 需改 nginx)。
+  Future<({String? fileId, String? error})> uploadMedia(File file, String mime,
       {void Function(int, int)? onProgress}) async {
     final acc = _currentAccount;
-    if (acc == null) return null;
+    if (acc == null) return (fileId: null, error: '未添加账户');
     final http = _http ?? BotApiHttp(serverUrl: acc.serverUrl, token: acc.token);
     final r = await http.uploadFile(file, mime, onProgress: onProgress);
-    return r?.fileId;
+    return (fileId: r.result?.fileId, error: r.error);
   }
 
   /// 上传完成 → 发 message(file_ids)。
@@ -482,11 +482,11 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
             ? 'application/pdf'
             : 'application/octet-stream';
     }
-    final id = await uploadMedia(file, mime, onProgress: (s, t) {
+    final r = await uploadMedia(file, mime, onProgress: (s, t) {
       updateUploadProgress(createdAt, t > 0 ? s / t : 0);
     });
-    if (id != null && mounted) {
-      finalizeMediaSend(createdAt, id, msgType);
+    if (r.fileId != null && mounted) {
+      finalizeMediaSend(createdAt, r.fileId!, msgType);
     } else if (mounted) {
       failMediaUpload(createdAt);
     }

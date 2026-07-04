@@ -17,6 +17,17 @@ String botapiBase(String serverUrl) {
   return '$s/api/v1/botapi';
 }
 
+/// 规整媒体下载 URL：服务端 file 事件的 url 可能是相对路径（如 /files/xxx），
+/// dio 无法解析 host 会 connectionError。相对路径拼 serverUrl 的 origin；
+/// 绝对 URL（带 scheme+host）原样返回。
+String resolveMediaUrl(String url, String serverUrl) {
+  final u = Uri.tryParse(url);
+  if (u != null && u.hasScheme && u.host.isNotEmpty) return url;
+  final origin = Uri.parse(botapiBase(serverUrl)).origin;
+  final p = url.startsWith('/') ? url : '/$url';
+  return '$origin$p';
+}
+
 class UploadResult {
   final String fileId;
   final String name;
@@ -103,15 +114,20 @@ class BotApiHttp {
     }
   }
 
-  /// 上传文件。返回 UploadResult；失败 null。
-  Future<UploadResult?> uploadFile(File file, String contentType,
+  /// 上传文件。返回 (result, error):成功 error=null;失败 result=null 并附原因
+  /// (413=服务端 nginx 拒绝大文件,超时,等),便于 UI 给用户明确提示。
+  Future<({UploadResult? result, String? error})> uploadFile(
+      File file, String contentType,
       {void Function(int sent, int total)? onProgress}) async {
     try {
       final filename = file.path.split('/').last;
       final dio = Dio(BaseOptions(
         baseUrl: _base,
         connectTimeout: const Duration(seconds: 15),
-        sendTimeout: const Duration(seconds: 120),
+        // sendTimeout 是发送请求体的整体时限;50MB 在移动网络下 120s 常不够,
+        // 放宽到 10min 覆盖慢网络。MultipartFile.fromFile 本身是流式读文件,
+        // 不会把整文件读入内存。
+        sendTimeout: const Duration(minutes: 10),
         receiveTimeout: const Duration(seconds: 60),
       ));
       final form = FormData.fromMap({
@@ -122,16 +138,33 @@ class BotApiHttp {
           data: form, options: Options(headers: _authHeaders), onSendProgress: onProgress);
       if (res.statusCode == 200 && res.data is Map) {
         final m = res.data as Map<String, dynamic>;
-        return UploadResult(
-          fileId: m['file_id'] as String,
-          name: m['name'] as String,
-          mimeType: (m['mime_type'] as String?) ?? 'application/octet-stream',
-          size: (m['size'] as num).toInt(),
+        return (
+          result: UploadResult(
+            fileId: m['file_id'] as String,
+            name: m['name'] as String,
+            mimeType: (m['mime_type'] as String?) ?? 'application/octet-stream',
+            size: (m['size'] as num).toInt(),
+          ),
+          error: null,
         );
       }
-      return null;
-    } catch (_) {
-      return null;
+      return (result: null, error: '上传失败: HTTP ${res.statusCode}');
+    } on DioException catch (e) {
+      final sc = e.response?.statusCode;
+      if (sc == 413) {
+        return (
+          result: null,
+          error: '文件过大,服务端拒绝(413)。需在服务器 nginx 配置 '
+              'client_max_body_size(如 200m)并 reload。'
+        );
+      }
+      if (e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.connectionTimeout) {
+        return (result: null, error: '上传超时,网络过慢或文件过大');
+      }
+      return (result: null, error: '上传失败: ${e.type.name}');
+    } catch (e) {
+      return (result: null, error: '上传失败: $e');
     }
   }
 
@@ -185,13 +218,26 @@ class BotApiHttp {
     }
   }
 
+  /// 规整下载 URL：服务端 file 事件的 url 可能是相对路径（如 /files/xxx），
+  /// dio 无法解析 host 会 connectionError。相对路径拼 serverUrl 的 origin。
+  String _resolveUrl(String url) => resolveMediaUrl(url, serverUrl);
+
   /// 下载媒体 URL（单次有效，免认证）。写入 attachments 目录，返回本地 File。
+  /// 流式写入文件，避免一次性 bytes 把大文件读入内存 OOM/超 receiveTimeout。
   Future<File?> downloadByUrl(String url) async {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(minutes: 10),
+    ));
+    Response<ResponseBody>? res;
     try {
       final dir = await getApplicationDocumentsDirectory();
       final cacheDir = Directory('${dir.path}/attachments');
       if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
-      final tail = Uri.parse(url).pathSegments.last;
+      final absUrl = _resolveUrl(url);
+      final tail = Uri.parse(absUrl).pathSegments.isNotEmpty
+          ? Uri.parse(absUrl).pathSegments.last
+          : '';
       final name = (tail.isEmpty
               ? DateTime.now().millisecondsSinceEpoch.toString()
               : tail)
@@ -199,19 +245,38 @@ class BotApiHttp {
       final path = '${cacheDir.path}/$name';
       final existing = File(path);
       if (await existing.exists() && await existing.length() > 0) return existing;
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 60),
-      ));
-      final res = await dio.get<List<int>>(url, options: Options(responseType: ResponseType.bytes));
+
+      res = await dio.get<ResponseBody>(absUrl,
+          options: Options(responseType: ResponseType.stream));
       final ct = res.headers.value('content-type') ?? '';
-      if (res.statusCode != 200 || ct.contains('application/json')) return null;
-      final bytes = res.data ?? const <int>[];
-      if (bytes.isEmpty) return null;
-      await existing.writeAsBytes(bytes);
+      if (res.statusCode != 200 || ct.contains('application/json')) {
+        await res.data?.stream.listen(null).cancel();
+        return null;
+      }
+      final sink = existing.openWrite();
+      int received = 0;
+      try {
+        await for (final chunk in res.data!.stream) {
+          sink.add(chunk);
+          received += chunk.length;
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+      if (received == 0) {
+        if (await existing.exists()) await existing.delete();
+        return null;
+      }
       return existing;
     } catch (_) {
+      // 流被中途打断:关 sink、删半成品文件,避免缓存残缺文件误导"已下载"。
+      try {
+        await res?.data?.stream.listen(null).cancel();
+      } catch (_) {}
       return null;
+    } finally {
+      dio.close();
     }
   }
 

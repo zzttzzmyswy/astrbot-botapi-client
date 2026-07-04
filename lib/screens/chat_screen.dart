@@ -523,15 +523,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(chatProvider.notifier);
     final key = notifier
         .createPendingMedia(msgType: 'voice', localPath: file.path);
-    final id = await notifier.uploadMedia(file, 'audio/wav', onProgress: (s, t) {
+    final r = await notifier.uploadMedia(file, 'audio/wav', onProgress: (s, t) {
       notifier.updateUploadProgress(key, t > 0 ? s / t : 0);
     });
-    if (id != null && mounted) {
-      notifier.finalizeMediaSend(key, id, 'voice');
+    if (r.fileId != null && mounted) {
+      notifier.finalizeMediaSend(key, r.fileId!, 'voice');
     } else if (mounted) {
       notifier.failMediaUpload(key);
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('语音发送失败'), backgroundColor: Colors.redAccent));
+          SnackBar(content: Text(r.error ?? '语音发送失败'), backgroundColor: Colors.redAccent));
     }
   }
 
@@ -539,15 +539,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(chatProvider.notifier);
     final key = notifier
         .createPendingMedia(msgType: 'image', localPath: file.path);
-    final id = await notifier.uploadMedia(file, 'image/jpeg', onProgress: (s, t) {
+    final r = await notifier.uploadMedia(file, 'image/jpeg', onProgress: (s, t) {
       notifier.updateUploadProgress(key, t > 0 ? s / t : 0);
     });
-    if (id != null && mounted) {
-      notifier.finalizeMediaSend(key, id, 'image');
+    if (r.fileId != null && mounted) {
+      notifier.finalizeMediaSend(key, r.fileId!, 'image');
     } else if (mounted) {
       notifier.failMediaUpload(key);
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('图片上传失败'), backgroundColor: Colors.redAccent));
+          SnackBar(content: Text(r.error ?? '图片上传失败'), backgroundColor: Colors.redAccent));
     }
   }
 
@@ -555,15 +555,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(chatProvider.notifier);
     final key = notifier
         .createPendingMedia(msgType: 'file', localPath: file.path, content: filename);
-    final id = await notifier.uploadMedia(file, mime, onProgress: (s, t) {
+    final r = await notifier.uploadMedia(file, mime, onProgress: (s, t) {
       notifier.updateUploadProgress(key, t > 0 ? s / t : 0);
     });
-    if (id != null && mounted) {
-      notifier.finalizeMediaSend(key, id, 'file');
+    if (r.fileId != null && mounted) {
+      notifier.finalizeMediaSend(key, r.fileId!, 'file');
     } else if (mounted) {
       notifier.failMediaUpload(key);
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('文件上传失败'), backgroundColor: Colors.redAccent));
+          SnackBar(content: Text(r.error ?? '文件上传失败'), backgroundColor: Colors.redAccent));
     }
   }
 
