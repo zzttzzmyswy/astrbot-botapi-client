@@ -37,6 +37,15 @@ String _mediaCategory(String t) {
   }
 }
 
+// 哨兵:区分 copyWith「未传该参数」(保留旧值)与「显式传 null」(清空)。
+// 用于 streamingText/streamingThinking/errorMessage 三个可空且可被故意清空的
+// 字段。否则任何不传它们的 copyWith 都会把已累积的流式状态清成 null——例如
+// isToolStatus 分支 copyWith(messages: ...) 会清空 streamingText,导致工具调用
+// 之间的文本段丢失、final 只剩末段;isStreamingText 会清空 streamingThinking,
+// 致 final 时 thinking 为 null 不落库。用 const 实例才能作命名参数默认值。
+class _StrUnset { const _StrUnset(); }
+const _strUnset = _StrUnset();
+
 class ChatState {
   final List<LocalMessage> messages;
   final ConnState connectionState;
@@ -63,9 +72,9 @@ class ChatState {
   ChatState copyWith({
     List<LocalMessage>? messages,
     ConnState? connectionState,
-    String? streamingText,
-    String? streamingThinking,
-    String? errorMessage,
+    Object? streamingText = _strUnset,
+    Object? streamingThinking = _strUnset,
+    Object? errorMessage = _strUnset,
     bool? autoPlayVoice,
     List<Account>? accounts,
     String? currentAccountId,
@@ -74,9 +83,15 @@ class ChatState {
       ChatState(
         messages: messages ?? this.messages,
         connectionState: connectionState ?? this.connectionState,
-        streamingText: streamingText,
-        streamingThinking: streamingThinking,
-        errorMessage: errorMessage,
+        streamingText: identical(streamingText, _strUnset)
+            ? this.streamingText
+            : streamingText as String?,
+        streamingThinking: identical(streamingThinking, _strUnset)
+            ? this.streamingThinking
+            : streamingThinking as String?,
+        errorMessage: identical(errorMessage, _strUnset)
+            ? this.errorMessage
+            : errorMessage as String?,
         autoPlayVoice: autoPlayVoice ?? this.autoPlayVoice,
         accounts: accounts ?? this.accounts,
         currentAccountId: currentAccountId ?? this.currentAccountId,

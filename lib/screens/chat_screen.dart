@@ -459,7 +459,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
     int j = i - msgs.length;
     if (j == 0 && _state.streamingThinking?.isNotEmpty == true) {
-      return _ThinkingBlock(text: _state.streamingThinking!, isDark: _isDark);
+      // 用 Consumer watch 逐字刷新;否则 build 快照不更新,流式思考只显首字。
+      return Consumer(builder: (ctx, ref, _) {
+        final t = ref.watch(chatProvider.select((s) => s.streamingThinking)) ?? '';
+        return _ThinkingBlock(text: t, isDark: _isDark);
+      });
     }
     return Consumer(builder: (ctx, ref, _) {
       final st = ref.watch(chatProvider.select((s) => s.streamingText)) ?? '';
