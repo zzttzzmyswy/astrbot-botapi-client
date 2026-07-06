@@ -9,13 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_chat_ui: ^2.11.0
-  flutter_chat_core: ^2.0.0
   flutter_riverpod: ^2.5.0
   web_socket_channel: ^3.0.0
   http: ^1.2.0
   sqflite: ^2.3.0
-  sqflite_common_ffi: ^2.3.3
   shared_preferences: ^2.3.0
   connectivity_plus: ^6.0.0
   image_picker: ^1.0.0
@@ -32,6 +29,7 @@ dependencies:
   dio: ^5.7.0
   http_parser: ^4.1.0
   package_info_plus: ^8.1.0
+  flutter_animate: ^4.5.0
 
 dev_dependencies:
   flutter_test:
