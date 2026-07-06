@@ -98,34 +98,43 @@ class ChatInputBar extends StatelessWidget {
                 ),
               )),
               const SizedBox(width: 6),
-              hasText
-                  ? GestureDetector(
-                      onTap: send,
-                      child: Container(
-                        width: 42,
-                        height: 42,
-                        decoration: const BoxDecoration(
-                            shape: BoxShape.circle, color: Color(0xFF5B4BD6)),
-                        child: const Icon(Icons.send_rounded,
-                            color: Colors.white, size: 22),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                switchInCurve: Curves.easeOutBack,
+                transitionBuilder: (child, animation) =>
+                    ScaleTransition(scale: animation, child: child),
+                child: hasText
+                    ? GestureDetector(
+                        key: const ValueKey('send'),
+                        onTap: send,
+                        child: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(0xFF5B4BD6)),
+                          child: const Icon(Icons.send_rounded,
+                              color: Colors.white, size: 22),
+                        ),
+                      )
+                    : GestureDetector(
+                        key: const ValueKey('mic'),
+                        onLongPressStart: (_) => onVoiceStart(),
+                        onLongPressMoveUpdate: (d) =>
+                            onVoiceMove(d.localPosition.dy),
+                        onLongPressEnd: (_) => onVoiceEnd(),
+                        child: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _accent.withValues(
+                                  alpha: isDark ? 0.22 : 0.12)),
+                          child: Icon(Icons.mic_none_rounded,
+                              color: _accent, size: 22),
+                        ),
                       ),
-                    )
-                  : GestureDetector(
-                      onLongPressStart: (_) => onVoiceStart(),
-                      onLongPressMoveUpdate: (d) =>
-                          onVoiceMove(d.localPosition.dy),
-                      onLongPressEnd: (_) => onVoiceEnd(),
-                      child: Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _accent.withValues(
-                                alpha: isDark ? 0.22 : 0.12)),
-                        child: Icon(Icons.mic_none_rounded,
-                            color: _accent, size: 22),
-                      ),
-                    ),
+              ),
             ]),
       ),
     ]);

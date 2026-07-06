@@ -1,6 +1,7 @@
 // lib/screens/chat/bubbles/streaming_bubble.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart' as md;
+import '../../../design/tokens.dart';
 import 'text_bubble.dart';
 
 class StreamingBubble extends StatelessWidget {
@@ -17,33 +18,37 @@ class StreamingBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = isDark ? const Color(0xFF212121) : const Color(0xFFE8E8EC);
-    final fg = isDark ? Colors.white : Colors.black;
+    final colors = isDark ? AppColors.dark : AppColors.light;
     return Padding(
-      padding: const EdgeInsets.only(left: 12, right: 12, bottom: 3),
+      padding: EdgeInsets.only(
+          left: AppSpacing.md,
+          right: AppSpacing.md,
+          bottom: AppSpacing.xs - 1),
       child: Align(
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: bw),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: bg,
+              color: colors.streamingBg,
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
+                topLeft: Radius.circular(AppRadius.lg),
+                topRight: Radius.circular(AppRadius.lg),
                 bottomLeft: Radius.circular(2),
-                bottomRight: Radius.circular(16),
+                bottomRight: Radius.circular(AppRadius.lg),
               ),
+              boxShadow: AppShadows.bubble(isDark),
             ),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md, vertical: AppSpacing.sm),
               child: text.isEmpty
                   ? const SizedBox.shrink()
                   : md.MarkdownBody(
                       data: text,
                       selectable: false,
-                      styleSheet: mdStyleSheet(fg, isDark),
+                      styleSheet:
+                          mdStyleSheet(colors.streamingText, isDark),
                       onTapLink: launchMarkdownUrl,
                     ),
             ),

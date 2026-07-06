@@ -262,7 +262,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         },
                         child: CustomScrollView(
                           controller: _scrollCtrl,
-                          physics: const ClampingScrollPhysics(),
+                          physics: const BouncingScrollPhysics(),
                           slivers: [
                             if (_loadingMore)
                               const SliverToBoxAdapter(

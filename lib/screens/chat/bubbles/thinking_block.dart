@@ -1,5 +1,6 @@
 // lib/screens/chat/bubbles/thinking_block.dart
 import 'package:flutter/material.dart';
+import '../../../design/tokens.dart';
 
 class ThinkingBlock extends StatefulWidget {
   final String text;
@@ -16,43 +17,44 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
 
   @override
   Widget build(BuildContext context) {
-    final fg =
-        widget.isDark ? const Color(0xFF9E9EA4) : const Color(0xFF8A8A8E);
+    final colors = widget.isDark ? AppColors.dark : AppColors.light;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 2),
       child: Container(
         decoration: BoxDecoration(
-            color: fg.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(8)),
+            color: colors.thinkingText.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(AppRadius.sm)),
         child: Column(children: [
           InkWell(
             onTap: () => setState(() => _open = !_open),
             child: Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(AppSpacing.sm),
               child: Row(children: [
-                const Icon(Icons.psychology_outlined,
-                    size: 14, color: Color(0xFF8A8A8E)),
+                Icon(Icons.psychology_outlined,
+                    size: 14, color: colors.thinkingText),
                 const SizedBox(width: 6),
                 Expanded(
                     child: Text('思考过程',
                         style: TextStyle(
-                            color: fg,
+                            color: colors.thinkingText,
                             fontSize: 12,
                             fontWeight: FontWeight.w500))),
                 AnimatedRotation(
                     turns: _open ? 0.5 : 0,
                     duration: const Duration(milliseconds: 150),
-                    child: Icon(Icons.expand_more, color: fg, size: 16)),
+                    child: Icon(Icons.expand_more,
+                        color: colors.thinkingText, size: 16)),
               ]),
             ),
           ),
           if (_open)
             Container(
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.sm),
                 child: Text(widget.text,
                     style: TextStyle(
-                        color: fg,
+                        color: colors.thinkingText,
                         fontSize: 11,
                         height: 1.3,
                         fontFamily: 'monospace'))),
