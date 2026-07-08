@@ -115,6 +115,10 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   // SSE 在途：当前正在等服务端响应的「我发出」文本消息的 createdAt（用于失败关联）。
   int? _inflightTextCreatedAt;
 
+  // 懒加载分页
+  static const int _pageSize = 50;
+  bool _hasMoreHistory = true;
+
   // 定时对齐：周期性用 since=本地最大 server_id 轻量拉取，有新行就合并补齐，
   // 兜底 SSE 静默丢消息。仅在前台运行（后台靠 SSE 实时 + 看门狗）。
   Timer? _alignTimer;
@@ -161,7 +165,11 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       await _cache.mergeHistory(hist.messages, accountId: acc.id);
       final cursor = await _cache.maxServerId(acc.id);
       _client?.sinceCursor = cursor; // 供下次 SSE 重连用更准的游标
-      final refreshed = await _cache.getMessages(accountId: acc.id);
+      final total = await _cache.getMessageCount(accountId: acc.id);
+      final refreshed = await _cache.getMessages(
+          accountId: acc.id, limit: _pageSize);
+      _hasMoreHistory =
+          refreshed.length >= _pageSize && total > _pageSize;
       if (mounted) _syncAccountState(messages: refreshed);
     } catch (_) {
       // 网络异常等：静默，下次再试。
@@ -188,7 +196,10 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       if (res.messages.isEmpty) return; // 已对齐
       await _cache.mergeHistory(res.messages, accountId: acc.id);
       _client?.sinceCursor = await _cache.maxServerId(acc.id);
-      final refreshed = await _cache.getMessages(accountId: acc.id);
+      final refreshed = await _cache.getMessages(
+          accountId: acc.id, limit: _pageSize);
+      _hasMoreHistory =
+          refreshed.length >= _pageSize;
       if (mounted) _syncAccountState(messages: refreshed);
     } catch (_) {
       // 静默：下次 tick 再试。
@@ -266,8 +277,11 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       }
       _http = BotApiHttp(serverUrl: acc.serverUrl, token: acc.token);
 
-      // 加载本地历史
-      final history = await _cache.getMessages(accountId: acc.id);
+      // 加载本地最新一页历史
+      final total = await _cache.getMessageCount(accountId: acc.id);
+      final history = await _cache.getMessages(
+          accountId: acc.id, limit: _pageSize);
+      _hasMoreHistory = history.length >= _pageSize && total > _pageSize;
       _syncAccountState(messages: history);
 
       // 校验 token（带 transient 重试，克服冷启动 DNS 解析失败）
@@ -287,7 +301,13 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         // 合并失败不阻塞 SSE：实时流仍可工作，下次重连再补。
       }
       final cursor = await _cache.maxServerId(acc.id);
-      final refreshed = await _cache.getMessages(accountId: acc.id);
+      // 服务端合并后可能有新行，但只刷新当前页（避免闪烁）。
+      // loadMoreHistory() 负责加载更早的历史。
+      final refreshed = await _cache.getMessages(
+          accountId: acc.id, limit: _pageSize);
+      final newTotal = await _cache.getMessageCount(accountId: acc.id);
+      _hasMoreHistory =
+          refreshed.length >= _pageSize && newTotal > _pageSize;
       _syncAccountState(messages: refreshed);
 
       // 开 SSE 流
@@ -689,7 +709,10 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       if (res.messages.isEmpty) return;
       await _cache.mergeHistory(res.messages, accountId: acc.id);
       _client?.sinceCursor = await _cache.maxServerId(acc.id);
-      final refreshed = await _cache.getMessages(accountId: acc.id);
+      final refreshed = await _cache.getMessages(
+          accountId: acc.id, limit: _pageSize);
+      _hasMoreHistory =
+          refreshed.length >= _pageSize;
       if (mounted) _syncAccountState(messages: refreshed);
     } catch (_) {}
   }
@@ -774,7 +797,36 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     }
   }
 
-  Future<bool> loadMoreHistory() async => false; // botapi 历史在 connect 时全量加载
+  /// 加载更早的历史消息（向上滚动触发）。返回是否有新消息被加载。
+  Future<bool> loadMoreHistory() async {
+    if (!_hasMoreHistory) return false;
+    final acc = _currentAccount;
+    if (acc == null) return false;
+    final currentCount = state.messages.length;
+    final older = await _cache.getMessages(
+        accountId: acc.id, limit: _pageSize, offset: currentCount);
+    if (older.isEmpty) {
+      _hasMoreHistory = false;
+      return false;
+    }
+    // 汇总当前已加载的 server_id 用于去重（避免 mergeHistory 后 offset 窗口
+    // 移动导致与当前列表重叠）。
+    final seenIds = state.messages
+        .where((m) => m.serverId != null)
+        .map((m) => m.serverId!)
+        .toSet();
+    final deduped = older.where((m) {
+      if (m.serverId != null && seenIds.contains(m.serverId)) return false;
+      return true;
+    }).toList();
+    if (deduped.isEmpty) {
+      _hasMoreHistory = false;
+      return false;
+    }
+    _hasMoreHistory = older.length >= _pageSize;
+    state = state.copyWith(messages: [...deduped, ...state.messages]);
+    return true;
+  }
 
   void clearError() => state = state.copyWith(errorMessage: null);
 

@@ -349,6 +349,17 @@ class CacheService {
     return removed;
   }
 
+  /// 消息总数（按账户过滤）。用于判断是否还有更多历史可加载。
+  Future<int> getMessageCount({String? accountId}) async {
+    final d = await db;
+    final result = accountId == null
+        ? await d.rawQuery('SELECT COUNT(*) AS cnt FROM messages')
+        : await d.rawQuery(
+            'SELECT COUNT(*) AS cnt FROM messages WHERE session_id = ?',
+            [accountId]);
+    return (result.first['cnt'] as int?) ?? 0;
+  }
+
   /// 当前账户本地最大 server_id（用于 stream since 游标；无则 0）。
   Future<int> maxServerId(String accountId) async {
     final d = await db;
