@@ -575,7 +575,6 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         return;
       }
       if (event.isMedia) {
-        debugPrint('[ChatProvider] _handleEvent MEDIA type=${event.type} content=${event.content}');
         _handleMedia(event, now);
         return;
       }
@@ -615,6 +614,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     final placeholder = LocalMessage(
       msgType: type,
       content: label,
+      attachmentId: url, // 存 URL 供按需下载
       isFromMe: false,
       status: MessageStatus.sent,
       createdAt: now,
@@ -623,7 +623,6 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     _cache.upsert(placeholder, accountId: _cacheAccountId);
     if (url != null && url.isNotEmpty) {
       final localPath = await _downloadMedia(url);
-      debugPrint('[ChatProvider] _handleMedia type=$type url=$url localPath=$localPath');
       if (localPath != null && mounted) {
         final msgs = [...state.messages];
         for (int i = msgs.length - 1; i >= 0; i--) {
@@ -647,11 +646,20 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
 
   Future<String?> _downloadMedia(String url) async {
     final http = _http;
-    debugPrint('[ChatProvider] _downloadMedia http=$http url=$url');
     if (http == null) return null;
     final f = await http.downloadByUrl(url);
-    debugPrint('[ChatProvider] _downloadMedia result=${f?.path}');
     return f?.path;
+  }
+
+  /// 按需下载（点击时调用）。去重：同 URL 同时只下载一次。
+  final Map<String, Future<String?>> _inflightDownloads = {};
+
+  Future<String?> downloadMedia(String url) {
+    if (_inflightDownloads.containsKey(url)) return _inflightDownloads[url]!;
+    final fut = _downloadMedia(url);
+    _inflightDownloads[url] = fut;
+    fut.whenComplete(() => _inflightDownloads.remove(url));
+    return fut;
   }
 
   Future<void> _commitBotText(String full, int now) async {

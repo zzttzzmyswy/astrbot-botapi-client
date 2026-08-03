@@ -38,14 +38,25 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
         src = File(lp);
       }
       if (src == null || !await src.exists()) {
-        throw Exception('文件未缓存（可能已过期）');
+        // 本地无缓存 → 按 URL 下载
+        final url = (widget.m.attachmentId as String?) ?? '';
+        if (url.isNotEmpty) {
+          final path =
+              await ref.read(chatProvider.notifier).downloadMedia(url);
+          if (path != null) {
+            src = File(path);
+          }
+        }
+        if (src == null || !await src.exists()) {
+          throw Exception('文件下载失败');
+        }
       }
       final safe = name.replaceAll(RegExp(r'[/\\]'), '_');
       final tmp = await getTemporaryDirectory();
       final dest = File('${tmp.path}/astrbot_$safe');
       await dest.writeAsBytes(await src.readAsBytes());
-      // Android: 用系统分享面板
-      Share.shareXFiles([XFile(dest.path, name: name, mimeType: _mimeForName(name))]);
+      Share.shareXFiles(
+          [XFile(dest.path, name: name, mimeType: _mimeForName(name))]);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -178,7 +189,7 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
                                   : (errored
                                       ? '发送失败,点击重试'
                                       : (_downloading
-                                          ? '准备中…'
+                                          ? '下载中…'
                                           : '点击打开')),
                               style: TextStyle(
                                   color: errored

@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/message.dart';
 import '../../../providers/chat_provider.dart';
 
-/// 上传进度圆形指示器
 class UploadBadge extends StatelessWidget {
   final double progress;
   const UploadBadge({super.key, required this.progress});
@@ -53,8 +52,6 @@ class _ImageBubbleState extends ConsumerState<ImageBubble> {
     final lp = (widget.m.localPath as String?) ?? '';
     if (lp.isNotEmpty) {
       _downloaded = lp;
-    } else if (!widget.isMe) {
-      _loading = true;
     }
   }
 
@@ -74,8 +71,31 @@ class _ImageBubbleState extends ConsumerState<ImageBubble> {
     }
   }
 
+  Future<void> _tryDownload() async {
+    if (_downloaded != null || _loading) return;
+    setState(() => _loading = true);
+    final url = (widget.m.attachmentId as String?) ?? '';
+    if (url.isEmpty) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    final path =
+        await ref.read(chatProvider.notifier).downloadMedia(url);
+    if (path != null && mounted) {
+      setState(() {
+        _downloaded = path;
+        _loading = false;
+      });
+    } else if (mounted) {
+      setState(() => _loading = false);
+    }
+  }
+
   void _openFullScreen() {
-    if (_downloaded == null) return;
+    if (_downloaded == null) {
+      _tryDownload();
+      return;
+    }
     Navigator.of(context).push(PageRouteBuilder(
       opaque: false,
       barrierColor: Colors.black87,
@@ -147,8 +167,11 @@ class _ImageBubbleState extends ConsumerState<ImageBubble> {
                               strokeWidth: 2,
                               valueColor: AlwaysStoppedAnimation<Color>(
                                   placeholderColor))))
-                  : Icon(Icons.image,
-                      size: 48, color: placeholderColor))),
+                  : GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _tryDownload,
+                      child: Icon(Icons.image,
+                          size: 48, color: placeholderColor)))),
     );
   }
 }
