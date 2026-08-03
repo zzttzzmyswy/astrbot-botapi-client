@@ -647,8 +647,10 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
 
   Future<String?> _downloadMedia(String url) async {
     final http = _http;
+    debugPrint('[ChatProvider] _downloadMedia http=$http url=$url');
     if (http == null) return null;
     final f = await http.downloadByUrl(url);
+    debugPrint('[ChatProvider] _downloadMedia result=${f?.path}');
     return f?.path;
   }
 
