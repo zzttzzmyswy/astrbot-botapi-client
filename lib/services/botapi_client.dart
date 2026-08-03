@@ -1,7 +1,7 @@
 // lib/services/botapi_client.dart
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:http/http.dart' as http;
 import '../models/botapi_event.dart';
 import '../util/reconnect.dart';

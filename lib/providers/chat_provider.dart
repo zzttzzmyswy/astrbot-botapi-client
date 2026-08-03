@@ -14,6 +14,7 @@ import '../services/audio_playback_service.dart';
 import '../services/cache_service.dart';
 import '../services/config_service.dart';
 import '../services/account_store.dart';
+import '../util/active_connection.dart';
 import '../util/stream_text.dart';
 import '../util/interrupted_marker.dart';
 import 'config_provider.dart';
@@ -104,10 +105,8 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   final CacheService _cache = CacheService();
   final AccountStore _accounts;
   bool _accountsLoaded = false;
-  BotApiClient? _client;
   BotApiHttp? _http;
-  StreamSubscription<BotApiEvent>? _eventSub;
-  StreamSubscription<ConnState>? _stateSub;
+  final ActiveConnection _conn = ActiveConnection();
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   // 未连接时暂存的待发消息（文本/媒体 fileIds），connected 后 drain。
   final List<_PendingSend> _pendingQueue = [];
@@ -164,7 +163,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       final hist = await http.fetchHistory(since: 0);
       await _cache.mergeHistory(hist.messages, accountId: acc.id);
       final cursor = await _cache.maxServerId(acc.id);
-      _client?.sinceCursor = cursor; // 供下次 SSE 重连用更准的游标
+      _conn.client?.sinceCursor = cursor; // 供下次 SSE 重连用更准的游标
       final total = await _cache.getMessageCount(accountId: acc.id);
       final refreshed = await _cache.getMessages(
           accountId: acc.id, limit: _pageSize);
@@ -195,7 +194,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       final res = await http.fetchHistory(since: localMax);
       if (res.messages.isEmpty) return; // 已对齐
       await _cache.mergeHistory(res.messages, accountId: acc.id);
-      _client?.sinceCursor = await _cache.maxServerId(acc.id);
+      _conn.client?.sinceCursor = await _cache.maxServerId(acc.id);
       final refreshed = await _cache.getMessages(
           accountId: acc.id, limit: _pageSize);
       _hasMoreHistory =
@@ -207,6 +206,16 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   }
 
   void attachPlayback(AudioPlaybackNotifier p) => _playback = p;
+
+  /// 构造 SSE 客户端（测试可覆写注入假实现）。生产用真实 [BotApiClient]。
+  @visibleForTesting
+  BotApiClient buildClient(Account acc) =>
+      BotApiClient(serverUrl: acc.serverUrl, token: acc.token);
+
+  /// 构造 REST 客户端（测试可覆写）。生产用真实 [BotApiHttp]。
+  @visibleForTesting
+  BotApiHttp buildHttp(Account acc) =>
+      BotApiHttp(serverUrl: acc.serverUrl, token: acc.token);
 
   bool get autoPlayVoice => state.autoPlayVoice;
 
@@ -250,23 +259,19 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   }
 
   Future<void> connect() async {
+    final intent = _conn.beginIntent();
     _connectivitySub?.cancel();
     _connectivitySub = null;
-    _eventSub?.cancel();
-    _eventSub = null;
-    _stateSub?.cancel();
-    _stateSub = null;
     _alignTimer?.cancel();
     _alignTimer = null;
-    await _client?.dispose();
-    _client = null;
-
+    await _conn.disposeCurrent(); // 顶部拆掉上一轮连接
     try {
       state = state.copyWith(
           errorMessage: null,
           streamingText: null,
           streamingThinking: null);
       await _ensureAccountsLoaded();
+      if (!_conn.isCurrent(intent)) return; // 被更新的 connect 超越
       final acc = _currentAccount;
       if (acc == null) {
         state = state.copyWith(
@@ -275,17 +280,18 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         _syncAccountState();
         return;
       }
-      _http = BotApiHttp(serverUrl: acc.serverUrl, token: acc.token);
+      _http = buildHttp(acc);
 
-      // 加载本地最新一页历史
       final total = await _cache.getMessageCount(accountId: acc.id);
       final history = await _cache.getMessages(
           accountId: acc.id, limit: _pageSize);
       _hasMoreHistory = history.length >= _pageSize && total > _pageSize;
       _syncAccountState(messages: history);
+      if (!_conn.isCurrent(intent)) return;
 
       // 校验 token（带 transient 重试，克服冷启动 DNS 解析失败）
       final ok = await _http!.auth();
+      if (!_conn.isCurrent(intent)) return;
       if (!ok) {
         state = state.copyWith(
             connectionState: ConnState.disconnected,
@@ -293,26 +299,25 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         return;
       }
 
-      // 拉服务端历史并合并补漏（fetchHistory 带 transient 重试）
       final hist = await _http!.fetchHistory(since: 0);
+      if (!_conn.isCurrent(intent)) return;
       try {
         await _cache.mergeHistory(hist.messages, accountId: acc.id);
-      } catch (_) {
-        // 合并失败不阻塞 SSE：实时流仍可工作，下次重连再补。
-      }
+      } catch (_) {}
       final cursor = await _cache.maxServerId(acc.id);
-      // 服务端合并后可能有新行，但只刷新当前页（避免闪烁）。
-      // loadMoreHistory() 负责加载更早的历史。
       final refreshed = await _cache.getMessages(
           accountId: acc.id, limit: _pageSize);
       final newTotal = await _cache.getMessageCount(accountId: acc.id);
       _hasMoreHistory =
           refreshed.length >= _pageSize && newTotal > _pageSize;
+      if (!_conn.isCurrent(intent)) return;
       _syncAccountState(messages: refreshed);
 
-      // 开 SSE 流
-      _client = BotApiClient(serverUrl: acc.serverUrl, token: acc.token);
-      _stateSub = _client!.state.listen((s) {
+      // 接管前再清理一次：防兄弟轮在 isCurrent 校验与 install 之间装了连接。
+      await _conn.disposeCurrent();
+      if (!_conn.isCurrent(intent)) return;
+      final client = buildClient(acc);
+      final stateSub = client.state.listen((s) {
         if (s == ConnState.disconnected || s == ConnState.reconnecting) {
           _flushInterruptedStream();
         }
@@ -326,11 +331,14 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
           }
         }
       });
-      _eventSub = _client!.events.listen(_handleEvent);
-      await _client!.connect(sinceCursor: cursor);
+      final eventSub = client.events.listen(_handleEvent);
+      await _conn.install(
+          client: client, eventSub: eventSub, stateSub: stateSub);
+      await client.connect(sinceCursor: cursor);
       _startAlignCheck();
 
-      _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      _connectivitySub =
+          Connectivity().onConnectivityChanged.listen((results) {
         if (!results.contains(ConnectivityResult.none) &&
             state.connectionState == ConnState.disconnected) {
           connect();
@@ -522,8 +530,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     if (event.isError) {
       if (event.code == 'SESSION_KICKED') {
         // 管理员强制断开：停止自动重连，等用户检查/重连。
-        await _client?.dispose();
-        _client = null;
+        await _conn.disposeCurrent();
         state = state.copyWith(
             connectionState: ConnState.disconnected,
             errorMessage: event.message ?? '会话已被管理员断开');
@@ -708,7 +715,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       final res = await http.fetchHistory(since: localMax);
       if (res.messages.isEmpty) return;
       await _cache.mergeHistory(res.messages, accountId: acc.id);
-      _client?.sinceCursor = await _cache.maxServerId(acc.id);
+      _conn.client?.sinceCursor = await _cache.maxServerId(acc.id);
       final refreshed = await _cache.getMessages(
           accountId: acc.id, limit: _pageSize);
       _hasMoreHistory =
@@ -847,12 +854,11 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _eventSub?.cancel();
-    _stateSub?.cancel();
     _connectivitySub?.cancel();
     _alignTimer?.cancel();
     _replyCatchupTimer?.cancel();
-    _client?.dispose();
+    // _eventSub/_stateSub/_client 的释放统一由 ActiveConnection 负责。
+    _conn.disposeCurrent(); // async，fire-and-forget（与旧 _client?.dispose() 同语义）
     super.dispose();
   }
 }

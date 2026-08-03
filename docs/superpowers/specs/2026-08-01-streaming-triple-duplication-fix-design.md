@@ -129,11 +129,16 @@ _eventSub = _client!.events.listen(_handleEvent);  // 这里才赋新 sub
 
 ### 5.1 单元测试（`astrbot-app/test/`）
 
-- `chat_provider` 重入：模拟「connect#1 在 await auth 期间，connect#2 接管」，断言全程
-  至多一个激活 `BotApiClient`（用假 client 计数 new/dispose），至多一对 sub（计数
-  listen/cancel），`_handleEvent` 订阅数恒为 ≤1。
-- `BotApiClient` 重入：模拟「connect() 在 await send 期间再次 connect」，断言只有一次
-  `_parseStream` 处于激活（用假 streamedResponse 计数消费行数），事件不被重复 `add`。
+- `ActiveConnection` 接管语义：install 取代旧连接时 cancel 旧 event/state sub、
+  dispose 旧 client；disposeCurrent 拆当前；beginIntent/isCurrent 新轮超越旧轮
+  （`test/active_connection_test.dart`）。—— 锁定核心不变量「至多一个激活
+  连接，接管即拆旧」，正是泄漏的根因对症。
+- `BotApiClient` 重入：模拟「connect() 在 await send 期间再次 connect」，断言
+  只有最新一轮 `_parseStream` 激活、事件不被重复 `add`（见 Task 3）。
+- `ChatNotifier.connect()` 集成由手动 E2E（§5.2）覆盖：connect() 依赖
+  `connectivity_plus`（platform channel）、`SharedPreferences`、`CacheService`、
+  `Dio` 网络，单测需大量桩且本仓库无 ChatNotifier 单测先例；其不变量已由
+  `ActiveConnection` 单测 + `BotApiClient` 单测共同锁定。
 
 ### 5.2 端到端手测（真机）
 
