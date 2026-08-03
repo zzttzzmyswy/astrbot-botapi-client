@@ -21,6 +21,7 @@ class BotApiClient {
   /// 测试用：是否已 dispose（单测断言「旧 client 被 ActiveConnection 拆掉」）。
   @visibleForTesting
   bool get isDisposed => _disposed;
+  int _connectGen = 0; // connect() 世代号：新轮超越旧轮，令旧 _parseStream 退出
   int? _sinceCursor; // 重连时复用上次游标
 
   // 空闲看门狗：服务端每 30s 发 ping，故 90s 内无任何入站帧即可判定连接
@@ -56,6 +57,7 @@ class BotApiClient {
   /// 开 SSE 流。sinceCursor 为上次最大 history int id，用于断连补漏。
   Future<void> connect({int? sinceCursor}) async {
     if (_disposed) return;
+    final gen = ++_connectGen;
     _sinceCursor = sinceCursor;
     _setState(ConnState.connecting);
     try {
@@ -70,13 +72,13 @@ class BotApiClient {
       _httpClient?.close();
       _httpClient = http.Client();
       final streamedResponse = await withRetry(
-        () => _httpClient!.send(request).timeout(const Duration(seconds: 300)),
+        () => sendRequest(_httpClient!, request),
         isTransient: isTransientHttpError,
         maxAttempts: 3,
         delayFor: (i) => Duration(milliseconds: 1000 << i),
       );
+      if (gen != _connectGen) return; // 被更新的内部重连超越，本轮作废
       if (streamedResponse.statusCode != 200) {
-        // 401 等：token 问题或服务端拒绝，不再自重连，交给上层。
         _eventController.add(BotApiEvent.fromSse('error', {
           'code': 'CONNECT_FAILED',
           'message': 'HTTP ${streamedResponse.statusCode}',
@@ -88,10 +90,17 @@ class BotApiClient {
       _lastReceivedAt = DateTime.now();
       _setState(ConnState.connected);
       _startIdleWatchdog();
-      _parseStream(streamedResponse);
+      _parseStream(streamedResponse, gen);
     } catch (e) {
-      _scheduleReconnect();
+      if (gen == _connectGen) _scheduleReconnect();
     }
+  }
+
+  /// 发送 SSE GET 请求（测试可覆写注入假 [http.StreamedResponse]）。
+  @visibleForTesting
+  Future<http.StreamedResponse> sendRequest(
+      http.Client client, http.Request request) async {
+    return client.send(request).timeout(const Duration(seconds: 300));
   }
 
   void _startIdleWatchdog() {
@@ -125,16 +134,17 @@ class BotApiClient {
     });
   }
 
-  void _parseStream(http.StreamedResponse resp) async {
+  void _parseStream(http.StreamedResponse resp, int gen) async {
     String? eventType;
     final dataBuf = StringBuffer();
     try {
-      final lines = resp.stream.transform(utf8.decoder).transform(const LineSplitter());
+      final lines = resp.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
       await for (final line in lines) {
-        if (_disposed) break;
-        _lastReceivedAt = DateTime.now(); // 任何入站帧（含 ping/空行）都视为连接活跃
+        if (_disposed || gen != _connectGen) break; // 被超越则退出，不再喂数据
+        _lastReceivedAt = DateTime.now();
         if (line.startsWith(':')) {
-          // SSE 注释行，忽略
           continue;
         } else if (line.startsWith('event:')) {
           eventType = line.substring(6).trim();
@@ -146,7 +156,6 @@ class BotApiClient {
           final type = eventType;
           eventType = null;
           if (raw.isEmpty) {
-            // 仅 event 行无 data（罕见）—— ping 可能 data:{}，此处空 data 视为 ping 占位
             if (type == 'ping') {
               _eventController.add(BotApiEvent.fromSse('ping', {}));
             }
@@ -155,12 +164,11 @@ class BotApiClient {
           try {
             final json = jsonDecode(raw) as Map<String, dynamic>;
             _eventController.add(BotApiEvent.fromSse(type, json));
-          } catch (_) {
-            // data 非 JSON：忽略（不应发生）
-          }
+          } catch (_) {}
         }
       }
     } catch (_) {}
+    if (gen != _connectGen) return; // 被超越：不触发重连（由超越轮接管）
     _idleWatchdog?.cancel();
     if (!_disposed) {
       _setState(ConnState.disconnected);
