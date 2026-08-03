@@ -1,7 +1,7 @@
 // lib/services/botapi_client.dart
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import '../models/botapi_event.dart';
 import '../util/reconnect.dart';
@@ -17,6 +17,10 @@ class BotApiClient {
   final ReconnectAttempt _reconnect = ReconnectAttempt();
   bool _disposed = false;
   http.Client? _httpClient;
+
+  /// 测试用：是否已 dispose（单测断言「旧 client 被 ActiveConnection 拆掉」）。
+  @visibleForTesting
+  bool get isDisposed => _disposed;
   int? _sinceCursor; // 重连时复用上次游标
 
   // 空闲看门狗：服务端每 30s 发 ping，故 90s 内无任何入站帧即可判定连接
