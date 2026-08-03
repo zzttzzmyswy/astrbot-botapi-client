@@ -168,8 +168,8 @@ class BotApiClient {
         }
       }
     } catch (_) {}
+    _idleWatchdog?.cancel(); // 无论原因结束都先取消看门狗
     if (gen != _connectGen) return; // 被超越：不触发重连（由超越轮接管）
-    _idleWatchdog?.cancel();
     if (!_disposed) {
       _setState(ConnState.disconnected);
       _scheduleReconnect();
