@@ -575,6 +575,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         return;
       }
       if (event.isMedia) {
+        debugPrint('[ChatProvider] _handleEvent MEDIA type=${event.type} content=${event.content}');
         _handleMedia(event, now);
         return;
       }
@@ -622,6 +623,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     _cache.upsert(placeholder, accountId: _cacheAccountId);
     if (url != null && url.isNotEmpty) {
       final localPath = await _downloadMedia(url);
+      debugPrint('[ChatProvider] _handleMedia type=$type url=$url localPath=$localPath');
       if (localPath != null && mounted) {
         final msgs = [...state.messages];
         for (int i = msgs.length - 1; i >= 0; i--) {

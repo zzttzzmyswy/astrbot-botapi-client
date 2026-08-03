@@ -1,6 +1,6 @@
 // lib/services/botapi_http.dart
 import 'dart:io';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:dio/dio.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:path_provider/path_provider.dart';
@@ -327,12 +327,19 @@ class BotApiHttp {
       final existing = File(path);
       if (await existing.exists() && await existing.length() > 0) return existing;
 
+      debugPrint('[BotAPI] downloadByUrl: GET $absUrl');
       res = await dio.get<ResponseBody>(absUrl,
           options: Options(
               responseType: ResponseType.stream, headers: _authHeaders));
       final ct = res.headers.value('content-type') ?? '';
+      debugPrint('[BotAPI] downloadByUrl: status=${res.statusCode} ct=$ct');
       if (res.statusCode != 200 || ct.contains('application/json')) {
-        await res.data?.stream.listen(null).cancel();
+        // 非成功响应：读取一小段 body 诊断
+        try {
+          final bytes = await res.data!.stream.take(512).toList();
+          final body = String.fromCharCodes(bytes.expand((b) => b));
+          debugPrint('[BotAPI] downloadByUrl: BODY=${body.substring(0, body.length.clamp(0, 256))}');
+        } catch (_) {}
         return null;
       }
       final sink = existing.openWrite();
@@ -351,7 +358,8 @@ class BotApiHttp {
         return null;
       }
       return existing;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[BotAPI] downloadByUrl: EXCEPTION $e');
       // 流被中途打断:关 sink、删半成品文件,避免缓存残缺文件误导"已下载"。
       try {
         await res?.data?.stream.listen(null).cancel();
