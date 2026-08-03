@@ -1,5 +1,6 @@
 // lib/services/botapi_http.dart
 import 'dart:io';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:dio/dio.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:path_provider/path_provider.dart';
@@ -46,6 +47,9 @@ class BotApiHttp {
   final String serverUrl;
   final String token;
   BotApiHttp({required this.serverUrl, required this.token});
+
+  @visibleForTesting
+  Map<String, String> get authHeaders => _authHeaders;
 
   String get _base => botapiBase(serverUrl);
   Map<String, String> get _authHeaders => {'Authorization': 'Bearer $token'};
@@ -299,7 +303,7 @@ class BotApiHttp {
   /// dio 无法解析 host 会 connectionError。相对路径拼 serverUrl 的 origin。
   String _resolveUrl(String url) => resolveMediaUrl(url, serverUrl);
 
-  /// 下载媒体 URL（单次有效，免认证）。写入 attachments 目录，返回本地 File。
+  /// 下载媒体 URL（单次有效，带认证）。写入 attachments 目录，返回本地 File。
   /// 流式写入文件，避免一次性 bytes 把大文件读入内存 OOM/超 receiveTimeout。
   Future<File?> downloadByUrl(String url) async {
     final dio = Dio(BaseOptions(
@@ -324,7 +328,8 @@ class BotApiHttp {
       if (await existing.exists() && await existing.length() > 0) return existing;
 
       res = await dio.get<ResponseBody>(absUrl,
-          options: Options(responseType: ResponseType.stream));
+          options: Options(
+              responseType: ResponseType.stream, headers: _authHeaders));
       final ct = res.headers.value('content-type') ?? '';
       if (res.statusCode != 200 || ct.contains('application/json')) {
         await res.data?.stream.listen(null).cancel();

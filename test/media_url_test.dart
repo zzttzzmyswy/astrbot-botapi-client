@@ -48,4 +48,11 @@ void main() {
       );
     });
   });
+
+  group('BotApiHttp.authHeaders', () {
+    test('包含 Bearer token', () {
+      final http = BotApiHttp(serverUrl: 'https://test.example.com', token: 'tok123');
+      expect(http.authHeaders, {'Authorization': 'Bearer tok123'});
+    });
+  });
 }
