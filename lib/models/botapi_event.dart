@@ -15,6 +15,7 @@ class BotApiEvent {
   final int? timestamp;
   final String? code; // error
   final String? message; // error
+  final String? sessionId; // 所属会话 id；缺省/默认会话为 null（兼容老服务器）
   final Map<String, dynamic>? raw;
 
   const BotApiEvent({
@@ -29,6 +30,7 @@ class BotApiEvent {
     this.timestamp,
     this.code,
     this.message,
+    this.sessionId,
     this.raw,
   });
 
@@ -54,6 +56,7 @@ class BotApiEvent {
       timestamp: (json['timestamp'] as num?)?.toInt(),
       code: json['code'] as String?,
       message: json['message'] as String?,
+      sessionId: json['session_id'] as String?,
       raw: json,
     );
   }

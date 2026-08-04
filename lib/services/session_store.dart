@@ -125,6 +125,22 @@ class SessionStore {
     await _persist();
   }
 
+  /// 整表替换某账户的会话列表（服务端权威镜像）。会话 id 以服务端为准，
+  /// 不重新生成本地 id。用于 connect 拉权威列表、以及 create/rename/delete 后同步。
+  Future<void> replaceAll(String accountId, List<ChatSession> sessions) async {
+    _ensureLoaded();
+    _byAccount[accountId] = List<ChatSession>.of(sessions);
+    await _persist();
+  }
+
+  /// 删除某账户的全部会话与当前会话记录（删除账户时级联清理）。
+  Future<void> clearForAccount(String accountId) async {
+    _ensureLoaded();
+    _byAccount.remove(accountId);
+    _currentByAccount.remove(accountId);
+    await _persist();
+  }
+
   Future<void> _persist() async {
     final obj = <String, dynamic>{};
     _byAccount.forEach((k, v) => obj[k] = v.map((s) => s.toJson()).toList());

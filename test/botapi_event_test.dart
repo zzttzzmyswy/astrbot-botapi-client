@@ -56,6 +56,16 @@ void main() {
       expect(e.event, 'ping');
       expect(e.isPing, true);
     });
+    test('session_id 解析：显式/空/缺省', () {
+      final e = BotApiEvent.fromSse('message', {
+        'type': 'text', 'content': 'hi', 'session_id': 's1',
+      });
+      expect(e.sessionId, 's1');
+      final empty = BotApiEvent.fromSse('message', {'type': 'text', 'session_id': ''});
+      expect(empty.sessionId, '');
+      final missing = BotApiEvent.fromSse('message', {'type': 'text'});
+      expect(missing.sessionId, isNull);
+    });
     test('image isMedia', () {
       final e = BotApiEvent.fromSse('message', {'type': 'image', 'content': 'http://x/y.jpg'});
       expect(e.isMedia, true);

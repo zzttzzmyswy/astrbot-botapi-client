@@ -141,6 +141,60 @@ class BotApiHttp {
     }
   }
 
+  /// 新建会话。返回新会话；达到上限或名字为空 → 返回 null（服务端 400）。
+  /// 网络异常同样返回 null（调用方 UI 统一提示）。
+  Future<ChatSession?> createSession(String name) async {
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final res = await dio.post('$_base/sessions',
+          data: {'name': name},
+          options: Options(
+              headers: {..._authHeaders, 'Content-Type': 'application/json'}));
+      if (res.statusCode == 200 && res.data is Map) {
+        final s = (res.data as Map)['session'];
+        if (s is Map) return ChatSession.fromJson(Map<String, dynamic>.from(s));
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 重命名会话。成功返回 true。
+  Future<bool> renameSession(String sid, String name) async {
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final res = await dio.post('$_base/sessions/$sid/rename',
+          data: {'name': name},
+          options: Options(
+              headers: {..._authHeaders, 'Content-Type': 'application/json'}));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 删除会话。成功返回 true。
+  Future<bool> deleteSession(String sid) async {
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final res = await dio.post('$_base/sessions/$sid/delete',
+          options: Options(headers: _authHeaders));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 发消息。返回 message_id；失败返回 null。
   Future<String?> sendMessage({String? text, List<String>? fileIds}) async {
     try {
