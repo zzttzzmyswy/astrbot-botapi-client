@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:http/http.dart' as http;
 import '../models/botapi_event.dart';
+import '../services/session_store.dart' show kDefaultSessionId;
 import '../util/reconnect.dart';
 import '../util/retry.dart';
 
@@ -12,6 +13,7 @@ import '../util/retry.dart';
 class BotApiClient {
   final String serverUrl;
   final String token;
+  final String sessionId;
 
   Timer? _reconnectTimer;
   final ReconnectAttempt _reconnect = ReconnectAttempt();
@@ -38,7 +40,11 @@ class BotApiClient {
   Stream<BotApiEvent> get events => _eventController.stream;
   Stream<ConnState> get state => _stateController.stream;
 
-  BotApiClient({required this.serverUrl, required this.token});
+  BotApiClient({
+    required this.serverUrl,
+    required this.token,
+    this.sessionId = '',
+  });
 
   /// 更新 since 游标（provider 在合并历史后调用，供下次重连用更准的游标，减少冗余回放）。
   set sinceCursor(int? c) {
@@ -61,9 +67,13 @@ class BotApiClient {
     _sinceCursor = sinceCursor;
     _setState(ConnState.connecting);
     try {
-      final uri = sinceCursor != null
-          ? Uri.parse('$_base/stream?since=$sinceCursor')
-          : Uri.parse('$_base/stream');
+      final q = <String, String>{};
+      if (sinceCursor != null) q['since'] = '$sinceCursor';
+      if (sessionId.isNotEmpty && sessionId != kDefaultSessionId) {
+        q['session_id'] = sessionId;
+      }
+      final uri = Uri.parse('$_base/stream')
+          .replace(queryParameters: q.isEmpty ? null : q);
       final request = http.Request('GET', uri);
       request.headers.addAll({
         'Authorization': 'Bearer $token',

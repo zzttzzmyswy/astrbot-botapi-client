@@ -4,8 +4,16 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:dio/dio.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:path_provider/path_provider.dart';
+import '../models/chat_session.dart';
 import '../models/history_row.dart';
+import '../services/session_store.dart' show kDefaultSessionId;
 import '../util/retry.dart';
+
+/// 服务器不支持会话（GET /sessions 返回 404）。调用方据此降级为单会话模式。
+class SessionApiUnavailable implements Exception {
+  @override
+  String toString() => 'SessionApiUnavailable: 服务器不支持 /sessions API';
+}
 
 /// 规整 serverUrl 为 botapi base：保证以 /api/v1/botapi 结尾、无尾斜杠。
 String botapiBase(String serverUrl) {
@@ -43,10 +51,17 @@ class UploadResult {
 }
 
 /// botapi 无状态 REST 客户端。给定 (serverUrl, token)。
+/// [sessionId] 为当前会话 id；空串或 "default"（默认会话）时，
+/// 发送消息/拉历史省略 session_id（兼容不支持会话的老服务器）。
 class BotApiHttp {
   final String serverUrl;
   final String token;
-  BotApiHttp({required this.serverUrl, required this.token});
+  final String sessionId;
+  BotApiHttp({
+    required this.serverUrl,
+    required this.token,
+    this.sessionId = '',
+  });
 
   @visibleForTesting
   Map<String, String> get authHeaders => _authHeaders;
@@ -96,6 +111,36 @@ class BotApiHttp {
     }
   }
 
+  /// 拉服务器会话列表（服务端 /sessions）。404 → 抛 [SessionApiUnavailable]
+  /// （服务器不支持会话），供调用方降级为单会话模式。其余错误抛 DioException。
+  Future<List<ChatSession>> fetchSessions() async {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 12),
+    ));
+    try {
+      final res = await dio.get('$_base/sessions',
+          options: Options(headers: _authHeaders));
+      if (res.statusCode == 200 && res.data is Map) {
+        final m = res.data as Map<String, dynamic>;
+        final list = (m['sessions'] as List?) ?? [];
+        return list
+            .map((e) => ChatSession.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      throw DioException(
+        requestOptions: res.requestOptions,
+        type: DioExceptionType.badResponse,
+        response: res,
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) throw SessionApiUnavailable();
+      rethrow;
+    } finally {
+      dio.close();
+    }
+  }
+
   /// 发消息。返回 message_id；失败返回 null。
   Future<String?> sendMessage({String? text, List<String>? fileIds}) async {
     try {
@@ -107,6 +152,8 @@ class BotApiHttp {
           data: {
             if (text != null && text.isNotEmpty) 'text': text,
             if (fileIds != null && fileIds.isNotEmpty) 'file_ids': fileIds,
+            if (sessionId.isNotEmpty && sessionId != kDefaultSessionId)
+              'session_id': sessionId,
           },
           options: Options(headers: {..._authHeaders, 'Content-Type': 'application/json'}));
       if (res.statusCode == 200) {
@@ -261,6 +308,9 @@ class BotApiHttp {
           final q = <String, dynamic>{'limit': limit};
           if (since != null) q['since'] = since;
           if (before != null) q['before'] = before;
+          if (sessionId.isNotEmpty && sessionId != kDefaultSessionId) {
+            q['session_id'] = sessionId;
+          }
           final res = await dio.get('$_base/history',
               queryParameters: q, options: Options(headers: _authHeaders));
           if (res.statusCode == 200 && res.data is Map) {
