@@ -303,6 +303,8 @@ class _AccountListView extends ConsumerWidget {
 /// 会话面板：返回 + 标题 + 新建按钮 + 会话列表。
 /// 每项：tap 选中（关抽屉）；菜单 重命名/删除；当前会话显示「当前」徽标。
 /// 默认会话（id == kDefaultSessionId）不显示删除项。
+/// 账户切换未完成（state.currentAccountId != account.id）时显示 loading，
+/// 避免误读/误操作旧账户会话；会话加载失败且无会话时显示错误提示。
 class _SessionPanel extends ConsumerWidget {
   final _Theme theme;
   final Account account;
@@ -327,6 +329,13 @@ class _SessionPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 账户切换进行中：view.account 已被设为新账户，但 selectAccount/connect()
+    // 尚未完成，state.currentAccountId 仍是旧账户、state.sessions 也还是旧账户
+    // 的列表。此刻渲染会话列表会短暂显示旧账户会话，用户可能误点/误删。故在
+    // currentAccountId 与面板账户一致前显示 loading，避免误操作旧账户会话。
+    final state = ref.watch(chatProvider);
+    final switching = state.currentAccountId != account.id;
+
     return Column(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
@@ -364,30 +373,50 @@ class _SessionPanel extends ConsumerWidget {
       ),
       Divider(height: 1, thickness: 0.5, color: theme.div),
       Expanded(
-        child: sessions.isEmpty
-            ? _EmptySessions(sub: theme.sub)
-            : ListView(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                children: [
-                  for (final s in sessions)
-                    _SessionTile(
-                      session: s,
-                      isCurrent: s.id == currentSessionId,
-                      isDark: theme.isDark,
-                      card: theme.card,
-                      cardActive: theme.cardActive,
-                      fg: theme.fg,
-                      sub: theme.sub,
-                      accent: theme.accent,
-                      onTap: () => onSelect(s.id),
-                      onRename: () =>
-                          _promptRename(context, ref, s, onRename),
-                      onDelete: s.id == kDefaultSessionId
-                          ? null // 默认会话不可删除
-                          : () => _confirmDelete(context, ref, s, onDelete),
-                    ),
-                ],
-              ),
+        child: switching
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2.5)),
+                      const SizedBox(height: 12),
+                      Text('会话加载中…',
+                          style: TextStyle(color: theme.sub, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              )
+            : sessions.isEmpty
+                ? (state.sessionsError != null
+                    ? _ErrorHint(sub: theme.sub, message: state.sessionsError!)
+                    : _EmptySessions(sub: theme.sub))
+                : ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    children: [
+                      for (final s in sessions)
+                        _SessionTile(
+                          session: s,
+                          isCurrent: s.id == currentSessionId,
+                          isDark: theme.isDark,
+                          card: theme.card,
+                          cardActive: theme.cardActive,
+                          fg: theme.fg,
+                          sub: theme.sub,
+                          accent: theme.accent,
+                          onTap: () => onSelect(s.id),
+                          onRename: () =>
+                              _promptRename(context, ref, s, onRename),
+                          onDelete: s.id == kDefaultSessionId
+                              ? null // 默认会话不可删除
+                              : () => _confirmDelete(context, ref, s, onDelete),
+                        ),
+                    ],
+                  ),
       ),
     ]);
   }
@@ -739,6 +768,26 @@ class _SessionTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ErrorHint extends StatelessWidget {
+  final Color sub;
+  final String message;
+  const _ErrorHint({required this.sub, required this.message});
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, size: 36, color: sub.withValues(alpha: 0.7)),
+              const SizedBox(height: 10),
+              Text(message, style: TextStyle(color: sub, fontSize: 13)),
+            ],
+          ),
+        ),
+      );
 }
 
 class _EmptySessions extends StatelessWidget {

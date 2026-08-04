@@ -16,6 +16,7 @@
 // 计时器即可完成）,且 connect() 的 auth/fetch 均被假实现短路为同步 future。
 // 因此每个 await 都由 pumpAndSettle 排空（其内部 flush 微任务与到期定时器）,
 // 无需真实 sleep,也不会命中 pump(duration) 只能推进 FakeAsync 计时的限制。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -52,6 +53,12 @@ class _FakeConnectivityPlatform extends ConnectivityPlatform {
 class _FakeHttp implements BotApiHttp {
   List<ChatSession> sessions = const [];
 
+  /// 为真（== 触发一次 fetchSessions 就重置为 false）时,
+  /// fetchSessions 挂起在一个 Completer 上,让测试可「冻结」会话加载
+  /// （账户切换 connect 中途,面板仍处 loading 状态）。
+  bool blockNextSessions = false;
+  final Completer<void> _sessionsGate = Completer<void>();
+
   @override
   String get serverUrl => 'http://fake';
   @override
@@ -79,12 +86,21 @@ class _FakeHttp implements BotApiHttp {
   Future<File?> downloadByUrl(String url) async => null;
 
   @override
-  Future<List<ChatSession>> fetchSessions() async => sessions;
+  Future<List<ChatSession>> fetchSessions() async {
+    if (blockNextSessions) {
+      blockNextSessions = false;
+      await _sessionsGate.future; // 冻结至测试显式放行
+    }
+    return sessions;
+  }
 
   @override
   Future<HistoryResult> fetchHistory(
           {int? since, int? before, int limit = 50}) async =>
       const HistoryResult(messages: [], hasMore: false);
+
+  /// 放行被冻结的 fetchSessions。
+  void releaseSessions() => _sessionsGate.complete();
 
   @override
   Future<ChatSession?> createSession(String name) async {
@@ -156,6 +172,23 @@ class _TestNotifier extends ChatNotifier {
         token: 'tok1',
         label: 'BotA');
   }
+
+  /// 直接置 sessionsError（模拟会话列表拉取失败）。
+  void setSessionsFailed(String message) {
+    state = state.copyWith(sessions: const [], sessionsError: message);
+  }
+}
+
+/// 加载时序测试专用：connect() 退化为「select + 拉会话 + 收尾」,
+/// 不触碰 _conn（避免测试环境 dispose 悬挂）。这覆盖「面板渲染时
+/// currentAccountId != 面板账户」这一核心时序,而不必真实跑完整连接。
+class _LoadingTestNotifier extends _TestNotifier {
+  _LoadingTestNotifier(super.config);
+
+  @override
+  Future<void> connect() async {
+    await runAuthoritativeOnlyConnect();
+  }
 }
 
 void main() {
@@ -183,14 +216,14 @@ void main() {
   });
 
   /// 构造抽屉测试环境并打开抽屉。
-  /// 返回已登录的 [ChatNotifier],供断言状态/方法调用。
-  Future<ChatNotifier> pumpDrawer(
+  /// 返回已登录的 [_TestNotifier],供断言状态/方法调用/注入。
+  Future<_TestNotifier> pumpDrawer(
     WidgetTester tester, {
     List<ChatSession> sessions = const [],
   }) async {
     final config = ConfigService();
     await config.init();
-    final notifier = _TestNotifier(config);
+    final notifier = _LoadingTestNotifier(config);
     notifier.fakeHttp.sessions = sessions;
     await notifier.ensureAccount();
     // 注意：notifier 由 ProviderScope element 持有并在其 dispose 时统一释放,
@@ -341,5 +374,84 @@ void main() {
     // createSession 被调用：会话面板出现新会话
     expect(n.state.sessions.map((s) => s.name), contains('工作'));
     expect(find.text('工作'), findsOneWidget);
+  });
+
+  testWidgets('账户切换完成前会话面板显示 loading,不误显旧账户会话', (tester) async {
+    final n = await pumpDrawer(tester, sessions: const [
+      ChatSession(id: 'default', name: '默认会话'),
+      ChatSession(id: 's1', name: '旧账户会话'),
+    ]);
+
+    // 第二个账户（addAccount 会切到它）,随后切回 BotA,
+    // 使 BotA 是「当前 provider 账户」、BotB 是非当前账户。
+    final ok = await n.addAccount(
+        serverUrl: 'http://fake/api/v1/botapi',
+        token: 'tok2',
+        label: 'BotB');
+    expect(ok, isTrue);
+    await tester.pumpAndSettle();
+    final b = n.state.accounts.firstWhere((a) => a.label == 'BotB');
+    await n.selectAccount(n.state.accounts.firstWhere((a) => a.id != b.id).id);
+    await tester.pumpAndSettle();
+    expect(n.state.currentAccountName, 'BotA');
+
+    // 冻结下一次会话加载：BotB 的 connect 停在 fetchSessions,
+    // state.currentAccountId 仍是 BotA、state.sessions 仍是旧列表。
+    n.fakeHttp.blockNextSessions = true;
+    await tester.tap(find.text('BotB'));
+    await tester.pump();
+
+    // 面板标题立即为 BotB（同步设置）
+    expect(find.text('BotB'), findsOneWidget);
+    // loading 显示,旧账户会话不误显、无可删除会话
+    expect(find.text('会话加载中…'), findsOneWidget);
+    expect(find.text('旧账户会话'), findsNothing);
+    expect(find.text('删除'), findsNothing);
+
+    // 放行 fetchSessions → connect 完成 → 面板刷新为新账户会话
+    n.fakeHttp.releaseSessions();
+    await tester.pumpAndSettle();
+    expect(n.state.currentAccountId, b.id);
+    expect(find.text('会话加载中…'), findsNothing);
+    expect(find.text('默认会话'), findsOneWidget);
+  });
+
+  testWidgets('重复点当前账户：会话列表立即渲染,不出现 loading', (tester) async {
+    await pumpDrawer(tester, sessions: const [
+      ChatSession(id: 'default', name: '默认会话'),
+      ChatSession(id: 's1', name: '工作'),
+    ]);
+
+    // 当前账户即 BotA,currentAccountId 与面板账户一致 → 无需切换
+    await tester.tap(find.text('BotA'));
+    await tester.pump();
+    expect(find.text('会话加载中…'), findsNothing);
+    expect(find.text('工作'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('工作'), findsOneWidget);
+  });
+
+  testWidgets('会话加载失败（sessionsError）且无会话时显示错误提示而非「暂无会话」', (tester) async {
+    final n = await pumpDrawer(tester, sessions: const [
+      ChatSession(id: 'default', name: '默认会话'),
+      ChatSession(id: 's1', name: '工作'),
+    ]);
+    // 当前账户即 BotA（无需切换）。
+
+    // 模拟当前账户会话拉取失败：sessions 为空 + sessionsError 置位
+    // （与 connect() 的 catch 分支一致）。冻结 connect,使其在失败后的
+    // 重连完成前不覆盖该错误态。
+    n.setSessionsFailed('会话加载失败');
+    n.fakeHttp.blockNextSessions = true;
+    await tester.tap(find.text('BotA'));
+    await tester.pump();
+
+    // 当前账户面板：显示错误提示,不显示「暂无会话」
+    expect(find.text('会话加载失败'), findsOneWidget);
+    expect(find.text('暂无会话'), findsNothing);
+
+    // 收尾：放行冻结的 connect
+    n.fakeHttp.releaseSessions();
+    await tester.pumpAndSettle();
   });
 }

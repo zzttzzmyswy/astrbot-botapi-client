@@ -1040,6 +1040,23 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     _conn.disposeCurrent(); // async，fire-and-forget（与旧 _client?.dispose() 同语义）
     super.dispose();
   }
+
+  /// 测试 seam：仅执行「选账户 → 拉权威会话 → 同步状态」的 connect 最小流程,
+  /// 不触碰 SSE 连接生命周期（ActiveConnection）,供加载时序类 widget 测试
+  /// 在 FakeAsync 下驱动账户切换而不悬挂。生产路径仍走完整 [connect]。
+  @visibleForTesting
+  Future<void> runAuthoritativeOnlyConnect() async {
+    await _ensureAccountsLoaded();
+    final acc = _currentAccount;
+    if (acc == null) {
+      _syncAccountState();
+      return;
+    }
+    await _ensureSessionStoreLoaded();
+    _http = buildHttp(acc);
+    await _loadAuthoritativeSessions(acc);
+    _syncAccountState();
+  }
 }
 
 class _PendingSend {
