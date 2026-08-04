@@ -78,6 +78,15 @@ class ChatState {
     this.sessionsError,
   });
 
+  /// 当前会话显示名：按 currentSessionId 从 sessions 列表匹配；
+  /// 匹配不到（含单会话降级/默认会话不在列表）回退「默认会话」。
+  String get currentSessionName {
+    for (final s in sessions) {
+      if (s.id == currentSessionId) return s.name;
+    }
+    return '默认会话';
+  }
+
   ChatState copyWith({
     List<LocalMessage>? messages,
     ConnState? connectionState,

@@ -10,6 +10,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool isDark;
   final String? error;
   final String accountName;
+  final String sessionName;
   final bool streaming;
   final bool autoPlay;
   final bool reconnecting;
@@ -21,6 +22,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.isDark,
     this.error,
     required this.accountName,
+    this.sessionName = '默认会话',
     this.streaming = false,
     this.autoPlay = false,
     this.reconnecting = false,
@@ -56,13 +58,34 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(accountName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: txt)),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(
+                child: Text(accountName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: txt)),
+              ),
+              const SizedBox(width: 6),
+              // 当前会话标识：chip 显示会话名
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: isDark ? 0.35 : 0.14),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(sessionName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: _accent)),
+              ),
+            ]),
             if (streaming)
               Row(mainAxisSize: MainAxisSize.min, children: [
                 _TypingDots(color: _accent),

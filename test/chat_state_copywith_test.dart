@@ -8,6 +8,7 @@
 //   final 时 thinking 为 null 不落库。
 import 'package:flutter_test/flutter_test.dart';
 import 'package:astrbot_app/providers/chat_provider.dart';
+import 'package:astrbot_app/models/chat_session.dart';
 import 'package:astrbot_app/models/message.dart';
 
 void main() {
@@ -94,5 +95,36 @@ void main() {
     expect(s.errorMessage, isNull);
     expect(s.streamingText, isNull);
     expect(s.streamingThinking, isNull);
+  });
+
+  group('currentSessionName', () {
+    test('匹配会话列表中的名称', () {
+      final s = ChatState(
+        sessions: const [
+          ChatSession(id: 'default', name: '默认会话'),
+          ChatSession(id: 'abc', name: '工作'),
+        ],
+        currentSessionId: 'abc',
+      );
+      expect(s.currentSessionName, '工作');
+    });
+    test('currentSessionId 不在列表 → 回退默认会话', () {
+      final s = ChatState(
+        sessions: const [ChatSession(id: 'abc', name: '工作')],
+        currentSessionId: 'nope',
+      );
+      expect(s.currentSessionName, '默认会话');
+    });
+    test('降级态（空 sessions）→ 默认会话', () {
+      final s = ChatState(currentSessionId: 'default');
+      expect(s.currentSessionName, '默认会话');
+    });
+    test('默认会话在列表中 → 显示其名', () {
+      final s = ChatState(
+        sessions: const [ChatSession(id: 'default', name: '默认会话')],
+        currentSessionId: 'default',
+      );
+      expect(s.currentSessionName, '默认会话');
+    });
   });
 }

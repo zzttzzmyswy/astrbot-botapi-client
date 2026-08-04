@@ -209,6 +209,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         isDark: isDark,
         error: _state.errorMessage,
         accountName: _state.currentAccountName,
+        sessionName: _state.currentSessionName,
         streaming: _state.streamingText?.isNotEmpty == true,
         reconnecting: _state.connectionState == ConnState.reconnecting,
         autoPlay: _state.autoPlayVoice,
