@@ -652,14 +652,30 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   }
 
   /// 按需下载（点击时调用）。去重：同 URL 同时只下载一次。
-  final Map<String, Future<String?>> _inflightDownloads = {};
-
-  Future<String?> downloadMedia(String url) {
+  /// 下载成功后更新 state 和 DB 的 localPath。
+  Future<String?> downloadMedia(String url) async {
     if (_inflightDownloads.containsKey(url)) return _inflightDownloads[url]!;
-    final fut = _downloadMedia(url);
+    final fut = _doDownloadAndPersist(url);
     _inflightDownloads[url] = fut;
     fut.whenComplete(() => _inflightDownloads.remove(url));
     return fut;
+  }
+
+  final Map<String, Future<String?>> _inflightDownloads = {};
+
+  Future<String?> _doDownloadAndPersist(String url) async {
+    final path = await _downloadMedia(url);
+    if (path == null || !mounted) return path;
+    final msgs = [...state.messages];
+    for (int i = 0; i < msgs.length; i++) {
+      if (msgs[i].attachmentId == url && (msgs[i].localPath ?? '').isEmpty) {
+        msgs[i] = msgs[i].copyWith(localPath: path);
+        state = state.copyWith(messages: msgs);
+        _cache.upsert(msgs[i], accountId: _cacheAccountId);
+        break;
+      }
+    }
+    return path;
   }
 
   Future<void> _commitBotText(String full, int now) async {
