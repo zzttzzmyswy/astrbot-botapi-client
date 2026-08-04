@@ -20,6 +20,7 @@ import 'package:astrbot_app/models/account.dart';
 import 'package:astrbot_app/models/botapi_event.dart';
 import 'package:astrbot_app/models/chat_session.dart';
 import 'package:astrbot_app/models/history_row.dart';
+import 'package:astrbot_app/models/message.dart';
 import 'package:astrbot_app/providers/chat_provider.dart';
 import 'package:astrbot_app/services/botapi_client.dart';
 import 'package:astrbot_app/services/botapi_http.dart';
@@ -45,6 +46,8 @@ class _FakeHttp implements BotApiHttp {
   final List<String> createdNames = [];
   final List<String> renamed = [];
   final List<String> deleted = [];
+  int sendCount = 0; // 已发送消息数（断线队列误发检测）
+  final sentSessionIds = <String>[]; // 每次 sendMessage 时 http 携带的 sessionId
 
   @override
   String get serverUrl => 'http://fake';
@@ -64,6 +67,8 @@ class _FakeHttp implements BotApiHttp {
 
   @override
   Future<String?> sendMessage({String? text, List<String>? fileIds}) async {
+    sendCount++;
+    sentSessionIds.add(_sid);
     return 'msg_id';
   }
 
@@ -147,6 +152,9 @@ class _FakeClient implements BotApiClient {
     _states.add(ConnState.connected);
   }
 
+  /// 测试 seam：手动播报连接状态（模拟断线/重连中）。
+  void emitState(ConnState s) => _states.add(s);
+
   @override
   Future<http.StreamedResponse> sendRequest(
       http.Client client, http.Request request) async {
@@ -173,6 +181,7 @@ class TestNotifier extends ChatNotifier {
   final _fakeHttp = _FakeHttp();
   final httpBuilt = <String>[];
   final clientBuilt = <String>[];
+  _FakeClient? _lastClient; // 最近一次 buildClient 的实例（供播报状态 seam）
 
   /// 权威会话列表（转发到共享假 http）。
   set sessions(List<ChatSession> v) => _fakeHttp.sessions = v;
@@ -188,7 +197,9 @@ class TestNotifier extends ChatNotifier {
   @override
   BotApiClient buildClient(Account acc, {String sessionId = ''}) {
     clientBuilt.add(sessionId);
-    return _FakeClient(sessionId);
+    final c = _FakeClient(sessionId);
+    _lastClient = c;
+    return c;
   }
 }
 
@@ -424,5 +435,78 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(await sessionStoreOf.list(accId), isEmpty);
     expect(await sessionStoreOf.getCurrent(accId), isNull);
+  });
+
+    test('断开时暂存的消息在会话切换后不误发，且其 DB 行被置 error', () async {
+    final n = await makeNotifier();
+    n.sessions = [
+      const ChatSession(id: 'default', name: '默认会话'),
+      const ChatSession(id: 's1', name: '工作'),
+    ];
+    await n.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(n.state.connectionState, ConnState.connected);
+    final accId = n.state.currentAccountId;
+    expect(n._fakeHttp.sendCount, 0);
+
+    // 模拟断线：SSE 状态流播报 disconnected → 后续 sendText 走 pending 分支。
+    n._lastClient!.emitState(ConnState.disconnected);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(n.state.connectionState, ConnState.disconnected);
+
+    n.sendText('断线时发出');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    // 断线时消息进入 default 分区（pending 行）并暂存待发队列。
+    final cache = CacheService();
+    expect((await cache.getMessages(accountId: '$accId:default'))
+        .map((m) => m.content), contains('断线时发出'));
+
+    // 切换会话到 s1 → connect() 应清空队列并把旧行置 error，绝不把该文本发到 s1。
+    await n.selectSession('s1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(n.state.currentSessionId, 's1');
+
+    expect(n._fakeHttp.sendCount, 0,
+        reason: '断线暂存消息不得在会话切换后被误发到新会话');
+    expect(n._fakeHttp.sentSessionIds, isEmpty);
+    // 旧分区里那行被置 error（用户可重试），且未被派发走。
+    final defMsgs = await cache.getMessages(accountId: '$accId:default');
+    final queuedRow =
+        defMsgs.firstWhere((m) => m.content == '断线时发出');
+    expect(queuedRow.status, MessageStatus.error,
+        reason: '断线暂存消息的 DB 行应在会话切换时被置 error');
+    // 新分区不应残留该文本。
+    final s1Msgs = await cache.getMessages(accountId: '$accId:s1');
+    expect(s1Msgs.map((m) => m.content), isNot(contains('断线时发出')));
+  });
+
+  test('账户B fetchSessions 抛非404错误 → sessions 清空、当前会话回退默认', () async {
+    final n = await makeNotifier();
+    final accA = n.state.currentAccountId;
+    n.sessions = [
+      const ChatSession(id: 'default', name: '默认会话'),
+      const ChatSession(id: 's1', name: '工作'),
+    ];
+    await n.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(n.state.sessions.map((s) => s.id), contains('s1'));
+    expect(n.state.currentSessionId, kDefaultSessionId);
+
+    // 构造账户 B：其 fetchSessions 抛非 404 错误（网络异常）。
+    await n.addAccount(
+        serverUrl: 'http://fake/api/v1/botapi', token: 'tok2', label: 'BotB');
+    await n.selectAccount(n.state.currentAccountId); // addAccount 已选中 B
+    // 让假 http 抛非 404 错误。
+    n.sessionsError = Exception('network down');
+    await n.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    // B 的会话拉取失败：不得泄漏 A 的列表/当前会话。
+    expect(n.state.currentAccountId, isNot(accA));
+    expect(n.state.sessions, isEmpty,
+        reason: '账户B 会话拉取失败时 sessions 必须清空，不能渲染 A 的会话');
+    expect(n.state.currentSessionId, kDefaultSessionId,
+        reason: '会话拉取失败时当前会话必须回退默认，不能用 A 遗留的会话 id');
+    expect(n.state.sessionsError, '会话列表加载失败');
   });
 }

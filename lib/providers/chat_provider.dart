@@ -267,7 +267,8 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
 
   /// 拉服务端权威会话列表 → 写 [SessionStore] 镜像 → 恢复该账户当前会话。
   /// 服务器 404（不支持会话 API）→ 降级单会话模式 `[default]`。
-  /// 失败（网络异常等）时保留现有 state.sessions 不动，仅置 sessionsError。
+  /// 失败（网络异常等）→ 清空 sessions、回退默认会话、置 sessionsError，
+  /// 防止旧账户的列表/当前会话泄漏到新账户（面板渲染别家数据、connect 打错会话）。
   Future<void> _loadAuthoritativeSessions(Account acc) async {
     try {
       final fetched = await _http!.fetchSessions();
@@ -286,7 +287,14 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         sessionsError: null,
       );
     } catch (_) {
-      state = state.copyWith(sessionsError: '会话列表加载失败');
+      // 网络异常等：不能保留旧账户的会话列表/当前会话（账户已切换），否则面板
+      // 会渲染上一账户的会话、connect 也会用旧会话 id 打新服务器。清空回退默认，
+      // 让面板展示错误态而不是别家数据。
+      state = state.copyWith(
+        sessions: const [],
+        currentSessionId: kDefaultSessionId,
+        sessionsError: '会话列表加载失败',
+      );
     }
   }
 
@@ -332,6 +340,9 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
           streamingThinking: null);
       await _ensureAccountsLoaded();
       if (!_conn.isCurrent(intent)) return; // 被更新的 connect 超越
+      // 会话/账户切换或重连：作废断线期间暂存的待发消息与在途文本，防止
+      // 队列在重连后被派发到「新会话」的 http（跨会话误发）。
+      await _resetOutboundState();
       final acc = _currentAccount;
       if (acc == null) {
         state = state.copyWith(
@@ -425,6 +436,32 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     }
   }
 
+  /// 会话/账户切换或重连时作废断线期间暂存的消息。
+  ///
+  /// 队列里的消息是「断开时插入旧会话分区 + 排队」的，重连后 http 已被换成
+  /// 新会话，直接 drain 会把文本发给错误会话，且旧分区行将永远停在 pending。
+  /// 故：对每条待发消息，在 state.messages 里按 createdAt 匹配 isFromMe 行并
+  /// 置 error（+ 落库到该消息排队时的分区——此时 currentSessionId 可能已被
+  /// 切换，故用 _PendingSend 里记录的 partitionKey 而非 _cacheKey），再清空
+  /// 队列。用户看到「发送失败」可重试。
+  Future<void> _resetOutboundState() async {
+    if (_pendingQueue.isNotEmpty) {
+      final pending = List<_PendingSend>.from(_pendingQueue);
+      _pendingQueue.clear();
+      for (final p in pending) {
+        final msgs = _markOutboundError(state.messages, p.createdAt);
+        state = state.copyWith(messages: msgs);
+        for (final m in msgs) {
+          if (m.createdAt == p.createdAt && m.isFromMe) {
+            await _cache.upsert(m, accountId: p.partitionKey);
+          }
+        }
+      }
+    }
+    // 断开/切换期间仍挂在 in-flight 的文本：无 SSE 事件可关联，作废掉。
+    _inflightTextCreatedAt = null;
+  }
+
   void sendText(String text) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final localMsg = LocalMessage(
@@ -442,12 +479,14 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   void _doSendText({required int createdAt, String? text, List<String>? fileIds}) {
     final http = _http;
     if (http == null) {
-      _pendingQueue.add(_PendingSend(createdAt: createdAt, text: text, fileIds: fileIds));
+      _pendingQueue.add(_PendingSend(
+          createdAt: createdAt, text: text, fileIds: fileIds, partitionKey: _cacheKey));
       return;
     }
     final conn = state.connectionState;
     if (conn != ConnState.connected) {
-      _pendingQueue.add(_PendingSend(createdAt: createdAt, text: text, fileIds: fileIds));
+      _pendingQueue.add(_PendingSend(
+          createdAt: createdAt, text: text, fileIds: fileIds, partitionKey: _cacheKey));
       return;
     }
     if (text != null) _inflightTextCreatedAt = createdAt;
@@ -1063,6 +1102,10 @@ class _PendingSend {
   final int createdAt;
   final String? text;
   final List<String>? fileIds;
+  // 消息排队时的 DB 分区键（账户id:会话id）。重连/切换后 _cacheKey 已指向
+  // 新会话，置 error 时必须回写排队时的分区，否则旧行永远停在 pending。
+  final String partitionKey;
   bool get isText => text != null;
-  _PendingSend({required this.createdAt, this.text, this.fileIds});
+  _PendingSend(
+      {required this.createdAt, this.text, this.fileIds, required this.partitionKey});
 }
