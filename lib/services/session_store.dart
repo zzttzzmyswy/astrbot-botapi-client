@@ -125,6 +125,14 @@ class SessionStore {
     await _persist();
   }
 
+  /// 移除某账户的当前会话记录（切回默认会话时调用；默认会话隐式，不持久化，
+  /// 若不清掉旧的 current 记录，下次 connect 会恢复成它而非默认）。
+  Future<void> clearCurrent(String accountId) async {
+    _ensureLoaded();
+    _currentByAccount.remove(accountId);
+    await _persist();
+  }
+
   /// 整表替换某账户的会话列表（服务端权威镜像）。会话 id 以服务端为准，
   /// 不重新生成本地 id。用于 connect 拉权威列表、以及 create/rename/delete 后同步。
   Future<void> replaceAll(String accountId, List<ChatSession> sessions) async {

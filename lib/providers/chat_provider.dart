@@ -271,7 +271,10 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   Future<void> _loadAuthoritativeSessions(Account acc) async {
     try {
       final fetched = await _http!.fetchSessions();
-      await _sessionStore.replaceAll(acc.id, fetched);
+      // 镜像过滤：默认会话是隐式回退，本地不持久化（否则 deleteSession('default')
+      // 只删本地、服务端仍返回，下次 connect 又冒出来）。
+      await _sessionStore.replaceAll(
+          acc.id, fetched.where((s) => s.id != kDefaultSessionId).toList());
       state = state.copyWith(sessions: fetched, sessionsError: null);
       var restored = await _sessionStore.getCurrent(acc.id) ?? kDefaultSessionId;
       // 服务端已无该会话（其它设备删除）→ 回退默认会话。
@@ -917,7 +920,13 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     final acc = _currentAccount;
     if (acc == null) return;
     await _ensureSessionStoreLoaded();
-    await _sessionStore.setCurrent(acc.id, sid);
+    // 默认会话是隐式回退，本地不持久化 current（须清掉旧记录，否则下次
+    // connect 恢复镜像时会还原成旧的 current 而非默认）。
+    if (sid == kDefaultSessionId) {
+      await _sessionStore.clearCurrent(acc.id);
+    } else {
+      await _sessionStore.setCurrent(acc.id, sid);
+    }
     state = state.copyWith(currentSessionId: sid, sessionsError: null);
     await connect();
   }
@@ -968,7 +977,8 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       sessionsError: null,
     );
     if (sid == state.currentSessionId) {
-      await _sessionStore.setCurrent(acc.id, kDefaultSessionId);
+      // 切回默认：默认会话隐式，不 setCurrent（避免把 'default' 写进 current 键）；
+      // SessionStore.delete 已移除该账户的 current 记录。
       state = state.copyWith(currentSessionId: kDefaultSessionId);
       await connect();
     }

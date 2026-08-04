@@ -377,6 +377,38 @@ void main() {
     expect(s1Msgs.map((m) => m.content), isNot(contains('在默认会话')));
   });
 
+  test('默认会话不持久化：镜像过滤 + select/delete 不写 current=default', () async {
+    final n = await makeNotifier();
+    final accId = n.state.currentAccountId;
+    final store = n.sessionStoreForTest;
+    n.sessions = [
+      const ChatSession(id: 'default', name: '默认会话'),
+      const ChatSession(id: 's1', name: '工作'),
+    ];
+    // connect 拉权威列表（含 default）：store 镜像必须过滤掉 default。
+    await n.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final mirrored = await store.list(accId);
+    expect(mirrored.map((s) => s.id), isNot(contains(kDefaultSessionId)));
+    expect(mirrored.map((s) => s.id), contains('s1'));
+
+    // selectSession('default')：不写 current=default。
+    await n.selectSession('s1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await n.selectSession('default');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(n.state.currentSessionId, kDefaultSessionId);
+    expect(await store.getCurrent(accId), isNull);
+
+    // deleteSession(当前 s1) 切回默认：不 setCurrent('default')，仅移除 current 记录。
+    await n.selectSession('s1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await n.deleteSession('s1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(n.state.currentSessionId, kDefaultSessionId);
+    expect(await store.getCurrent(accId), isNull);
+  });
+
   test('deleteAccount 级联清 SessionStore 该账户条目', () async {
     final n = await makeNotifier();
     final accId = n.state.currentAccountId;

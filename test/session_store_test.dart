@@ -1,7 +1,6 @@
 // test/session_store_test.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:astrbot_app/services/session_store.dart';
-import 'package:astrbot_app/models/chat_session.dart';
 
 class MemSessionStorage implements SessionStorage {
   final Map<String, String> _m = {};
@@ -17,12 +16,12 @@ void main() {
     await store.load();
     await store.add('acc1', '工作');
     final s = await store.list('acc1');
-    expect(s!.length, 1);
+    expect(s.length, 1);
     expect(s.first.name, '工作');
     await store.rename('acc1', s.first.id, '新名');
-    expect((await store.list('acc1'))!.first.name, '新名');
+    expect((await store.list('acc1')).first.name, '新名');
     await store.delete('acc1', s.first.id);
-    expect((await store.list('acc1'))!.isEmpty, true);
+    expect((await store.list('acc1')).isEmpty, true);
   });
 
   test('per-account current session', () async {
@@ -31,9 +30,20 @@ void main() {
     await store.add('acc1', 'A');
     await store.add('acc1', 'B');
     final list = await store.list('acc1');
-    await store.setCurrent('acc1', list![1].id);
+    await store.setCurrent('acc1', list[1].id);
     expect(await store.getCurrent('acc1'), list[1].id);
     expect(await store.getCurrent('acc2'), null);
+  });
+
+  test('clearCurrent removes current record', () async {
+    final store = SessionStore(MemSessionStorage());
+    await store.load();
+    await store.add('acc1', 'A');
+    final list = await store.list('acc1');
+    await store.setCurrent('acc1', list.first.id);
+    expect(await store.getCurrent('acc1'), list.first.id);
+    await store.clearCurrent('acc1');
+    expect(await store.getCurrent('acc1'), null);
   });
 
   test('cap 25', () async {
@@ -42,6 +52,6 @@ void main() {
     for (var i = 0; i < 26; i++) {
       await store.add('acc1', 's$i');
     }
-    expect((await store.list('acc1'))!.length, 25);
+    expect((await store.list('acc1')).length, 25);
   });
 }
