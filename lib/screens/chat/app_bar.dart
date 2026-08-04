@@ -69,21 +69,24 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                         color: txt)),
               ),
               const SizedBox(width: 6),
-              // 当前会话标识：chip 显示会话名
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: isDark ? 0.35 : 0.14),
-                  borderRadius: BorderRadius.circular(6),
+              // 当前会话标识：chip 显示会话名。Flexible 让超长会话名收缩而非溢出标题栏。
+              Flexible(
+                fit: FlexFit.loose,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: _accent.withValues(alpha: isDark ? 0.35 : 0.14),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(sessionName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: _accent)),
                 ),
-                child: Text(sessionName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: _accent)),
               ),
             ]),
             if (streaming)

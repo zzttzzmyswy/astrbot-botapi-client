@@ -119,12 +119,12 @@ void main() {
       final s = ChatState(currentSessionId: 'default');
       expect(s.currentSessionName, '默认会话');
     });
-    test('默认会话在列表中 → 显示其名', () {
+    test('默认会话被服务端改名后显示自定义名(按 id 匹配)', () {
       final s = ChatState(
-        sessions: const [ChatSession(id: 'default', name: '默认会话')],
+        sessions: const [ChatSession(id: 'default', name: '自定义默认')],
         currentSessionId: 'default',
       );
-      expect(s.currentSessionName, '默认会话');
+      expect(s.currentSessionName, '自定义默认');
     });
   });
 }
