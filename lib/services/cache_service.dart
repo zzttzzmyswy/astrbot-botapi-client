@@ -66,6 +66,19 @@ class CacheService {
           'CREATE INDEX IF NOT EXISTS idx_messages_server ON messages(server_id)');
     } catch (_) {}
     await db.execute('PRAGMA user_version = 6');
+    // session_id 语义从「账户id」升级为「账户id:会话id」。
+    // 在 schema 建立(含 onUpgrade 加列)之后执行,幂等且每次打开都跑:
+    // 已迁移的行 instr(':')>0 不受影响;新库无旧行,no-op。
+    await rekeyLegacySessions();
+  }
+
+  /// 幂等 re-key：session_id 语义从「账户id」升级为「账户id:会话id」。
+  /// 账户 id 不含冒号（base36+计数器），故 instr(session_id, ':')=0 精准匹配旧行。
+  Future<void> rekeyLegacySessions() async {
+    final d = await db;
+    await d.rawUpdate(
+        "UPDATE messages SET session_id = session_id || ':default' "
+        "WHERE session_id IS NOT NULL AND instr(session_id, ':') = 0");
   }
 
   Future<Database> _initDb() {
@@ -254,9 +267,12 @@ class CacheService {
   }
 
   /// 删除指定账户的全部消息（删除账户时调用）。
+  /// session_id 已语义化为「账户id:会话id」,故按前缀级联删除该账户的全部会话。
   Future<void> clearSession(String accountId) async {
     final d = await db;
-    await d.delete('messages', where: 'session_id = ?', whereArgs: [accountId]);
+    await d.delete('messages',
+        where: 'session_id = ? OR session_id LIKE ?',
+        whereArgs: [accountId, '$accountId:%']);
   }
 
   /// 合并 botapi 历史行：按 server_id 去重；已存在同内容实时行则贴 server_id；
