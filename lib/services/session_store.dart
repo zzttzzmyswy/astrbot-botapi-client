@@ -135,9 +135,10 @@ class SessionStore {
 
   /// 整表替换某账户的会话列表（服务端权威镜像）。会话 id 以服务端为准，
   /// 不重新生成本地 id。用于 connect 拉权威列表、以及 create/rename/delete 后同步。
+  /// 注：默认会话隐式，本地不持久化，故过滤掉 id="default" 的条目。
   Future<void> replaceAll(String accountId, List<ChatSession> sessions) async {
     _ensureLoaded();
-    _byAccount[accountId] = List<ChatSession>.of(sessions);
+    _byAccount[accountId] = sessions.where((s) => s.id != kDefaultSessionId).toList();
     await _persist();
   }
 

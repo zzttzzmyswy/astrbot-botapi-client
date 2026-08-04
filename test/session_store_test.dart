@@ -1,6 +1,7 @@
 // test/session_store_test.dart
 import 'package:flutter_test/flutter_test.dart';
-import 'package:astrbot_app/services/session_store.dart';
+import 'package:astrbot_app/models/chat_session.dart';
+import 'package:astrbot_app/services/session_store.dart' show SessionStore, SessionStorage, kDefaultSessionId;
 
 class MemSessionStorage implements SessionStorage {
   final Map<String, String> _m = {};
@@ -53,5 +54,20 @@ void main() {
       await store.add('acc1', 's$i');
     }
     expect((await store.list('acc1')).length, 25);
+  });
+
+  test('replaceAll filters out default session', () async {
+    final store = SessionStore(MemSessionStorage());
+    await store.load();
+    // 模拟服务端返回包含 default 的列表（不应该发生，但防御性处理）
+    final sessions = [
+      const ChatSession(id: kDefaultSessionId, name: '默认会话'),
+      const ChatSession(id: 'explicit1', name: 'Explicit 1'),
+      const ChatSession(id: 'explicit2', name: 'Explicit 2'),
+    ];
+    await store.replaceAll('acc1', sessions);
+    final list = await store.list('acc1');
+    expect(list.length, 2);
+    expect(list.map((s) => s.id).toList(), ['explicit1', 'explicit2']);
   });
 }

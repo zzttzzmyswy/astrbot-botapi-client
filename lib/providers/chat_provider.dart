@@ -271,10 +271,8 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   Future<void> _loadAuthoritativeSessions(Account acc) async {
     try {
       final fetched = await _http!.fetchSessions();
-      // 镜像过滤：默认会话是隐式回退，本地不持久化（否则 deleteSession('default')
-      // 只删本地、服务端仍返回，下次 connect 又冒出来）。
-      await _sessionStore.replaceAll(
-          acc.id, fetched.where((s) => s.id != kDefaultSessionId).toList());
+      // 镜像过滤在 SessionStore.replaceAll 中集中处理（默认会话隐式，不持久化）。
+      await _sessionStore.replaceAll(acc.id, fetched);
       state = state.copyWith(sessions: fetched, sessionsError: null);
       var restored = await _sessionStore.getCurrent(acc.id) ?? kDefaultSessionId;
       // 服务端已无该会话（其它设备删除）→ 回退默认会话。
