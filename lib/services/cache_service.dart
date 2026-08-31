@@ -275,6 +275,14 @@ class CacheService {
         whereArgs: [accountId, '$accountId:%']);
   }
 
+  /// 下载管理页删除本地文件后清空消息表的 local_path 引用：
+  /// 气泡不再指向缺失文件，点击可重新下载。
+  Future<int> clearLocalPath(String path) async {
+    final d = await db;
+    return d.update('messages', {'local_path': ''},
+        where: 'local_path = ?', whereArgs: [path]);
+  }
+
   /// 合并 botapi 历史行：按 server_id 去重；已存在同内容实时行则贴 server_id；
   /// 全新则插入。返回合并后该账户的最大 server_id（用于 stream since 游标）。
   Future<int> mergeHistory(List<HistoryRow> rows, {required String accountId}) async {

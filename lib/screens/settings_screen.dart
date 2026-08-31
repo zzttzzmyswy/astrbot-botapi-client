@@ -12,6 +12,7 @@ import '../providers/platform_providers.dart';
 import '../services/device_oem_service.dart';
 import '../util/oem_whitelist.dart';
 import '../widgets/oem_whitelist_dialog.dart';
+import 'download_manage_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -144,6 +145,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onTap: _showOemGuide,
             ),
           const Divider(),
+          ListTile(
+            leading: Icon(Icons.download_for_offline_rounded,
+                color: Theme.of(context).colorScheme.primary, size: 22),
+            title: const Text('下载管理'),
+            subtitle: const Text('管理 astrbot 发送的图片、文件、音频'),
+            trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const DownloadManageScreen())),
+          ),
           ListTile(
             title: const Text('清理缓存'),
             subtitle: Text('当前: $_cacheSize'),

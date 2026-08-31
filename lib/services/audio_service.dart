@@ -18,9 +18,16 @@ class AudioService {
   Future<void> startRecording() async {
     if (!await _permission.requestMic()) return; // 未授权不录
     final dir = await getTemporaryDirectory();
-    _recordingPath = '${dir.path}/draft_record.wav';
+    // AAC-LC(m4a)：Android 原生 MediaCodec 编码，体积约为同采样率 WAV 的 1/20，
+    // 长录音不再动辄几十 MB。单声道 64kbps 对语音足够，上传/试听均正常。
+    _recordingPath = '${dir.path}/draft_record.m4a';
     await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.wav),
+      const RecordConfig(
+        encoder: AudioEncoder.aacLc,
+        bitRate: 64000,
+        sampleRate: 44100,
+        numChannels: 1,
+      ),
       path: _recordingPath!,
     );
   }
