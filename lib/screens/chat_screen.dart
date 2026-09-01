@@ -10,6 +10,7 @@ import '../services/audio_service.dart';
 import '../providers/platform_providers.dart';
 import '../models/botapi_event.dart';
 import '../models/message.dart';
+import '../util/mime.dart';
 import '../widgets/attachment_panel.dart';
 import '../widgets/account_drawer.dart';
 import 'chat/app_bar.dart';
@@ -556,7 +557,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(chatProvider.notifier);
     final key =
         notifier.createPendingMedia(msgType: 'voice', localPath: file.path);
-    final r = await notifier.uploadMedia(file, 'audio/wav',
+    // m4a → audio/mp4，服务端按 audio/* 前缀映射为 Record 语音消息
+    final r = await notifier.uploadMedia(file, mimeForMediaSend(file.path, 'voice'),
         onProgress: (s, t) {
       notifier.updateUploadProgress(key, t > 0 ? s / t : 0);
     });

@@ -17,6 +17,7 @@ import '../services/config_service.dart';
 import '../services/account_store.dart';
 import '../services/session_store.dart';
 import '../util/active_connection.dart';
+import '../util/mime.dart';
 import '../util/stream_text.dart';
 import '../util/interrupted_marker.dart';
 import 'config_provider.dart';
@@ -615,7 +616,8 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     String mime;
     switch (msgType) {
       case 'voice':
-        mime = 'audio/wav';
+        // 录音已是 AAC(m4a)，重试按实际扩展名给 MIME（老 wav 录音兼容回退）
+        mime = mimeForMediaSend(localPath, 'voice');
         break;
       case 'image':
         mime = 'image/jpeg';

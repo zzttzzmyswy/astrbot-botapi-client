@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../util/mime.dart';
 
 class AttachmentPanel extends ConsumerStatefulWidget {
   final VoidCallback? onClose;
@@ -109,8 +110,8 @@ class _AttachmentPanelState extends ConsumerState<AttachmentPanel> {
       if (result == null || result.files.isEmpty) return;
       final file = File(result.files.single.path!);
       final filename = result.files.single.name;
-      final ext = result.files.single.extension ?? 'bin';
-      final mime = _mimeForExt(ext);
+      // 按原始文件名推断：picker 的缓存临时路径可能不带扩展名
+      final mime = mimeForExtension(filename);
       widget.onClose?.call();
       widget.onPickFile?.call(file, filename, mime);
     } catch (e) {
@@ -121,20 +122,6 @@ class _AttachmentPanelState extends ConsumerState<AttachmentPanel> {
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
-  }
-
-  String _mimeForExt(String ext) {
-    switch (ext.toLowerCase()) {
-      case 'jpg': case 'jpeg': return 'image/jpeg';
-      case 'png': return 'image/png';
-      case 'gif': return 'image/gif';
-      case 'pdf': return 'application/pdf';
-      case 'txt': return 'text/plain';
-      case 'mp4': return 'video/mp4';
-      case 'mp3': return 'audio/mpeg';
-      case 'wav': return 'audio/wav';
-      default: return 'application/octet-stream';
-    }
   }
 }
 

@@ -80,7 +80,9 @@ class _FakeHttp implements BotApiHttp {
   }
 
   @override
-  Future<File?> downloadByUrl(String url) async => null;
+  Future<File?> downloadByUrl(String url,
+          {void Function(int received, int? total)? onProgress}) async =>
+      null;
 
   @override
   Future<List<ChatSession>> fetchSessions() async {

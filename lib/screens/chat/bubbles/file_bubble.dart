@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../models/message.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../util/mime.dart';
 
 class FileBubble extends ConsumerStatefulWidget {
   final LocalMessage m;
@@ -56,7 +57,7 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
       final dest = File('${tmp.path}/astrbot_$safe');
       await dest.writeAsBytes(await src.readAsBytes());
       Share.shareXFiles(
-          [XFile(dest.path, name: name, mimeType: _mimeForName(name))]);
+          [XFile(dest.path, name: name, mimeType: mimeForExtension(name))]);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -67,44 +68,6 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
       }
     } finally {
       if (mounted) setState(() => _downloading = false);
-    }
-  }
-
-  static String _mimeForName(String name) {
-    final ext =
-        name.contains('.') ? name.split('.').last.toLowerCase() : '';
-    switch (ext) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'pdf':
-        return 'application/pdf';
-      case 'txt':
-        return 'text/plain';
-      case 'mp4':
-        return 'video/mp4';
-      case 'mp3':
-        return 'audio/mpeg';
-      case 'wav':
-        return 'audio/wav';
-      case 'doc':
-        return 'application/msword';
-      case 'docx':
-        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls':
-        return 'application/vnd.ms-excel';
-      case 'xlsx':
-        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'zip':
-        return 'application/zip';
-      default:
-        return 'application/octet-stream';
     }
   }
 

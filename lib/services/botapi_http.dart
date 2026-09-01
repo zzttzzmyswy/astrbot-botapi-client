@@ -7,7 +7,9 @@ import 'package:path_provider/path_provider.dart';
 import '../models/chat_session.dart';
 import '../models/history_row.dart';
 import '../services/session_store.dart' show kDefaultSessionId;
+import '../util/download_resume.dart';
 import '../util/retry.dart';
+import '../util/upload_reconcile.dart';
 
 /// 服务器不支持会话（GET /sessions 返回 404）。调用方据此降级为单会话模式。
 class SessionApiUnavailable implements Exception {
@@ -264,14 +266,22 @@ class BotApiHttp {
     ));
     try {
       final filename = file.path.split('/').last;
-      final form = FormData.fromMap({
-        'file': await MultipartFile.fromFile(file.path,
-            filename: filename, contentType: MediaType.parse(contentType)),
-      });
-      final res = await dio.post('/upload',
-          data: form,
-          options: Options(headers: _authHeaders),
-          onSendProgress: onProgress);
+      // 瞬态重试：FormData 每次重建，避免复用已消费的 multipart 流。
+      final res = await withRetry(
+        () async {
+          final form = FormData.fromMap({
+            'file': await MultipartFile.fromFile(file.path,
+                filename: filename, contentType: MediaType.parse(contentType)),
+          });
+          return dio.post('/upload',
+              data: form,
+              options: Options(headers: _authHeaders),
+              onSendProgress: onProgress);
+        },
+        isTransient: isTransientDioError,
+        maxAttempts: 3,
+        delayFor: (i) => Duration(seconds: 1 << i),
+      );
       if (res.statusCode == 200 && res.data is Map) {
         return (result: _resultFrom(res.data as Map), error: null);
       }
@@ -285,8 +295,13 @@ class BotApiHttp {
     }
   }
 
+  static const int _chunkSize = 5 * 1024 * 1024; // 5MB
+  static const int _chunkMaxAttempts = 3;
+
   /// 分块上传:5MB/块,逐块 POST /upload/chunk,最后 /upload/complete 合并。
   /// 每块远小于服务端 ~90s 请求超时,绕过单次大文件 408。
+  /// 质量加固:逐块瞬态重试(连接/超时);重试前用 0 字节块 probe 服务端真实
+  /// offset,判定超时块是否已落地,避免重复追加导致文件损坏。
   Future<({UploadResult? result, String? error})> _uploadChunked(
       File file, String contentType, int total,
       void Function(int, int)? onProgress) async {
@@ -300,43 +315,41 @@ class BotApiHttp {
       final filename = file.path.split('/').last;
       final uploadId =
           '${DateTime.now().millisecondsSinceEpoch}_${filename.hashCode.abs()}';
-      const chunkSize = 5 * 1024 * 1024; // 5MB
       final raf = await file.open();
       int offset = 0;
       try {
         while (offset < total) {
           final remaining = total - offset;
-          final thisLen = remaining > chunkSize ? chunkSize : remaining;
+          final thisLen = remaining > _chunkSize ? _chunkSize : remaining;
           final bytes = await raf.read(thisLen);
-          final form = FormData.fromMap({
-            'upload_id': uploadId,
-            'offset': '$offset',
-            'file': MultipartFile.fromBytes(bytes,
-                filename: 'chunk', contentType: MediaType.parse(contentType)),
-          });
-          final res = await dio.post('/upload/chunk',
-              data: form,
-              options: Options(headers: _authHeaders),
-              onSendProgress: (s, t) {
-                if (onProgress != null) onProgress(offset + s, total);
-              });
-          if (res.statusCode != 200) {
-            return (result: null, error: '块上传失败: HTTP ${res.statusCode}');
+          if (bytes.isEmpty) {
+            return (result: null, error: '上传失败: 文件读取为空');
           }
-          offset += bytes.length;
-          if (onProgress != null) onProgress(offset, total);
+          final r = await _sendChunkWithRetry(
+              dio, uploadId, offset, bytes, contentType, total, onProgress);
+          if (r.error != null) return (result: null, error: r.error);
+          final advanced = r.offset!;
+          if (advanced <= offset) {
+            return (result: null, error: '上传中断: 服务端进度未推进');
+          }
+          offset = advanced; // 以服务端 offset 推进,自愈字节漂移
         }
       } finally {
         await raf.close();
       }
-      final res = await dio.post('/upload/complete',
-          data: {
-            'upload_id': uploadId,
-            'filename': filename,
-            'mime_type': contentType,
-          },
-          options: Options(
-              headers: {..._authHeaders, 'Content-Type': 'application/json'}));
+      final res = await withRetry(
+        () => dio.post('/upload/complete',
+            data: {
+              'upload_id': uploadId,
+              'filename': filename,
+              'mime_type': contentType,
+            },
+            options: Options(
+                headers: {..._authHeaders, 'Content-Type': 'application/json'})),
+        isTransient: isTransientDioError,
+        maxAttempts: 3,
+        delayFor: (i) => Duration(seconds: 1 << i),
+      );
       if (res.statusCode == 200 && res.data is Map) {
         return (result: _resultFrom(res.data as Map), error: null);
       }
@@ -347,6 +360,88 @@ class BotApiHttp {
       return (result: null, error: '上传失败: $e');
     } finally {
       dio.close();
+    }
+  }
+
+  /// 单块上传，失败时瞬态重试（probe 协调未知结局）。
+  Future<({int? offset, String? error})> _sendChunkWithRetry(
+      Dio dio, String uploadId, int offset, List<int> bytes,
+      String contentType, int total, void Function(int, int)? onProgress) async {
+    int attempt = 0;
+    while (true) {
+      try {
+        final res = await dio.post('/upload/chunk',
+            data: FormData.fromMap({
+              'upload_id': uploadId,
+              'offset': '$offset',
+              'file': MultipartFile.fromBytes(bytes,
+                  filename: 'chunk',
+                  contentType: MediaType.parse(contentType)),
+            }),
+            options: Options(headers: _authHeaders),
+            onSendProgress: (s, t) {
+              if (onProgress != null) onProgress(offset + s, total);
+            });
+        if (res.statusCode != 200) {
+          return (offset: null, error: '块上传失败: HTTP ${res.statusCode}');
+        }
+        final serverOffset = (res.data is Map)
+            ? ((res.data as Map)['offset'] as num?)?.toInt()
+            : null;
+        final advanced = serverOffset ?? (offset + bytes.length);
+        if (onProgress != null) onProgress(advanced, total);
+        return (offset: advanced, error: null);
+      } on DioException catch (e) {
+        if (!isTransientDioError(e) || attempt >= _chunkMaxAttempts - 1) {
+          return (offset: null, error: _uploadError(e));
+        }
+        // 超时/断连：该块可能已写入服务端。probe 真实 offset 后判定。
+        final probe = await _probeChunkOffset(dio, uploadId);
+        final probeErr = probe.error;
+        final serverOffset = probe.offset;
+        if (probeErr != null) {
+          return (offset: null, error: probeErr);
+        }
+        if (serverOffset == null) {
+          return (offset: null, error: '上传中断: 无法确认服务端进度');
+        }
+        switch (reconcileChunkAfterProbe(
+            expectedOffset: offset,
+            serverOffset: serverOffset,
+            chunkLength: bytes.length)) {
+          case ChunkProbeResult.skipChunk:
+            if (onProgress != null) onProgress(serverOffset, total);
+            return (offset: serverOffset, error: null);
+          case ChunkProbeResult.abort:
+            return (offset: null, error: '上传中断: 服务端分块进度异常,请重试');
+          case ChunkProbeResult.sendChunk:
+            attempt++;
+            await Future.delayed(Duration(seconds: 1 << attempt));
+        }
+      }
+    }
+  }
+
+  /// 0 字节块 probe：服务端对空块不追加，仅返回当前 .part 大小（真实 offset）。
+  Future<({int? offset, String? error})> _probeChunkOffset(
+      Dio dio, String uploadId) async {
+    try {
+      final res = await dio.post('/upload/chunk',
+          data: FormData.fromMap({
+            'upload_id': uploadId,
+            'offset': '-1',
+            'file': MultipartFile.fromBytes(const [],
+                filename: 'probe',
+                contentType: MediaType.parse('application/octet-stream')),
+          }),
+          options: Options(headers: _authHeaders));
+      if (res.statusCode == 200 && res.data is Map) {
+        final o = (res.data as Map)['offset'];
+        return (offset: (o as num?)?.toInt(), error: null);
+      }
+      return (offset: null, error: '探测分块进度失败: HTTP ${res.statusCode}');
+    } on DioException catch (e) {
+      return (offset: null, error: _uploadError(e));
     }
   }
 
@@ -409,12 +504,18 @@ class BotApiHttp {
 
   /// 下载媒体 URL（单次有效，带认证）。写入 attachments 目录，返回本地 File。
   /// 流式写入文件，避免一次性 bytes 把大文件读入内存 OOM/超 receiveTimeout。
-  Future<File?> downloadByUrl(String url) async {
+  ///
+  /// 质量加固：先写 `name.part`，中断后保留部分文件；同 URL 再次下载时带
+  /// `Range: bytes=<已收>-` 续传（服务端支持则 206 续传，忽略 Range 返回 200
+  /// 则截断重写），瞬态失败自动重试，全失败把 .part 留给下次续传而非删除。
+  /// [onProgress]：`(received, total)`，total 为服务端可确定的文件总长，未知为 null。
+  Future<File?> downloadByUrl(String url,
+      {void Function(int received, int? total)? onProgress}) async {
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(minutes: 10),
     ));
-    Response<ResponseBody>? res;
     try {
       final dir = await getApplicationDocumentsDirectory();
       final cacheDir = Directory('${dir.path}/attachments');
@@ -427,43 +528,135 @@ class BotApiHttp {
               ? DateTime.now().millisecondsSinceEpoch.toString()
               : tail)
           .replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-      final path = '${cacheDir.path}/$name';
-      final existing = File(path);
-      if (await existing.exists() && await existing.length() > 0) return existing;
-
-      res = await dio.get<ResponseBody>(absUrl,
-          options: Options(
-              responseType: ResponseType.stream, headers: _authHeaders));
-      final ct = res.headers.value('content-type') ?? '';
-      if (res.statusCode != 200 || ct.contains('application/json')) {
-        await res.data?.stream.listen(null).cancel();
-        return null;
+      final finalFile = File('${cacheDir.path}/$name');
+      if (await finalFile.exists() && await finalFile.length() > 0) {
+        return finalFile; // 已完整下载过
       }
-      final sink = existing.openWrite();
-      int received = 0;
+      final partFile = File('${cacheDir.path}/$name.part');
       try {
-        await for (final chunk in res.data!.stream) {
-          sink.add(chunk);
-          received += chunk.length;
-        }
-        await sink.flush();
-      } finally {
-        await sink.close();
-      }
-      if (received == 0) {
-        if (await existing.exists()) await existing.delete();
+        return await withRetry(
+          () => _streamDownloadInto(
+              dio, partFile, absUrl, finalFile, onProgress),
+          isTransient: isTransientDioError,
+          maxAttempts: 3,
+          delayFor: (i) => Duration(seconds: 1 << i),
+        );
+      } catch (_) {
+        // 重试耗尽仍失败：保留 .part 供下次触发续传（不删除，不清 0）。
         return null;
       }
-      return existing;
     } catch (_) {
-      // 流被中途打断:关 sink、删半成品文件,避免缓存残缺文件误导"已下载"。
-      try {
-        await res?.data?.stream.listen(null).cancel();
-      } catch (_) {}
       return null;
     } finally {
       dio.close();
     }
+  }
+
+  /// 单次「GET + 流写入 .part」：自带 Range 续传/截断重写/416 收尾与完成判定。
+  /// 瞬态异常向上抛给外层 withRetry；本方法每次重入都按 .part 当前长度续传。
+  Future<File> _streamDownloadInto(
+      Dio dio, File part, String absUrl, File finalFile,
+      void Function(int received, int? total)? onProgress) async {
+    final start = await part.length();
+    final headers = <String, String>{..._authHeaders};
+    if (start > 0) headers['Range'] = 'bytes=$start-';
+    Response<ResponseBody> res;
+    try {
+      res = await dio.get<ResponseBody>(absUrl,
+          options: Options(responseType: ResponseType.stream, headers: headers));
+    } on DioException {
+      rethrow; // 交给外层 withRetry 判定瞬态
+    }
+
+    if (res.statusCode == 416) {
+      // Range 与服务端冲突：部分文件可能已收全（中断残留在改名前的边界）。
+      final total =
+          parseContentRangeTotal(res.headers.value('content-range'));
+      await res.data?.stream.listen(null).cancel();
+      if (decideRange416(partLength: start, serverTotal: total) ==
+          PartRangeDecision.complete) {
+        await _renamePartToFinal(part, finalFile);
+        return finalFile;
+      }
+      if (await part.exists()) await part.delete();
+      return _streamDownloadInto(dio, part, absUrl, finalFile, onProgress);
+    }
+
+    final ct = res.headers.value('content-type') ?? '';
+    if (res.statusCode != 200 && res.statusCode != 206) {
+      await res.data?.stream.listen(null).cancel();
+      throw DioException(
+        requestOptions: res.requestOptions,
+        type: DioExceptionType.badResponse,
+        response: res,
+      );
+    }
+    if (res.statusCode == 200 && ct.contains('application/json')) {
+      // 过期/失效链接：非瞬态，直接放弃。
+      await res.data?.stream.listen(null).cancel();
+      throw DioException(
+        requestOptions: res.requestOptions,
+        type: DioExceptionType.badResponse,
+        message: 'bad media response',
+      );
+    }
+
+    // 期望总长：
+    // - 206：Content-Range 的 total 是真值；缺失时退化为 start + content-length；
+    // - 200：服务端忽略 Range 返回全量，content-length 就是总长（不是 start+它）。
+    int expectedTotal = 0;
+    bool totalKnown = false;
+    final cl = int.tryParse(res.headers.value('content-length') ?? '');
+    if (res.statusCode == 206) {
+      final cr = parseContentRangeTotal(res.headers.value('content-range'));
+      if (cr != null) {
+        expectedTotal = cr;
+        totalKnown = true;
+      } else if (cl != null) {
+        expectedTotal = start + cl;
+        totalKnown = true;
+      }
+    } else if (cl != null) {
+      expectedTotal = cl;
+      totalKnown = true;
+    }
+
+    // 服务端忽略 Range 返回 200 全量：openWrite(writeOnly) 已截断 .part 从头写。
+    final append = res.statusCode == 206;
+    final sink = part.openWrite(
+        mode: append ? FileMode.writeOnlyAppend : FileMode.writeOnly);
+    int received = 0;
+    try {
+      await for (final chunk in res.data!.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+    }
+    if (onProgress != null && (received > 0 || !totalKnown)) {
+      onProgress(start + received, totalKnown ? expectedTotal : null);
+    }
+
+    final partLen = await part.length();
+    final done = totalKnown ? partLen >= expectedTotal : received > 0;
+    if (!done) {
+      // 拿了部分字节但未达目标：保留 .part，抛瞬态类异常触发外层重试。
+      throw DioException(
+        requestOptions: res.requestOptions,
+        type: DioExceptionType.receiveTimeout,
+        message:
+            '下载未完成 (len=$partLen, total=${totalKnown ? expectedTotal : "?"})',
+      );
+    }
+    await _renamePartToFinal(part, finalFile);
+    return finalFile;
+  }
+
+  Future<void> _renamePartToFinal(File part, File finalFile) async {
+    if (await finalFile.exists()) await finalFile.delete();
+    await part.rename(finalFile.path);
   }
 
   /// 清理 7 天前的附件缓存（botapi 媒体单次有效，本地缓存即下载文件）。
