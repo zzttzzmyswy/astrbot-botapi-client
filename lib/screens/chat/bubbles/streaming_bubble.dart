@@ -1,8 +1,7 @@
 // lib/screens/chat/bubbles/streaming_bubble.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart' as md;
 import '../../../design/tokens.dart';
-import 'text_bubble.dart';
+import '../markdown/markdown_view.dart';
 
 class StreamingBubble extends StatelessWidget {
   final String text;
@@ -44,13 +43,7 @@ class StreamingBubble extends StatelessWidget {
                   horizontal: AppSpacing.md, vertical: AppSpacing.sm),
               child: text.isEmpty
                   ? const SizedBox.shrink()
-                  : md.MarkdownBody(
-                      data: text,
-                      selectable: false,
-                      styleSheet:
-                          mdStyleSheet(colors.streamingText, isDark),
-                      onTapLink: launchMarkdownUrl,
-                    ),
+                  : buildMarkdown(text, colors.streamingText, isDark),
             ),
           ),
         ),
