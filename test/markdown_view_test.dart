@@ -5,8 +5,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_math_fork/flutter_math.dart' as fmath;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:markdown/markdown.dart' as mdp;
 
 import 'package:astrbot_app/screens/chat/bubbles/streaming_bubble.dart';
+import 'package:astrbot_app/screens/chat/markdown/alert_syntax.dart';
+import 'package:astrbot_app/screens/chat/markdown/latex_syntax.dart';
 import 'package:astrbot_app/screens/chat/markdown/markdown_view.dart';
 
 Future<void> _pump(WidgetTester t, String text,
@@ -96,7 +99,24 @@ void main() {
 
     testWidgets('alert 块渲染出内容', (t) async {
       await _pump(t, '> [!NOTE]\n> 这是提示');
+      expect(t.takeException(), isNull);
       expect(_visibleText(t).contains('这是提示'), isTrue);
+    });
+
+    test('alert 解析为 blockquote（自带左侧竖线样式），且吃掉 [!NOTE] 标记', () {
+      // 真机截图发现：若产出 section 且无样式，alert 会退化成一段平铺文字，
+      // 标题 "Note" 看起来像正文。锁死 blockquote，保证视觉上是独立 callout。
+      final doc = mdp.Document(
+        extensionSet: mdp.ExtensionSet.gitHubWeb,
+        inlineSyntaxes: kLatexInlineSyntaxes,
+        blockSyntaxes: [...kAlertBlockSyntaxes, ...kLatexBlockSyntaxes],
+      );
+      final nodes = doc.parse('> [!NOTE]\n> 这是提示');
+      expect(nodes, hasLength(1));
+      final el = nodes.single as mdp.Element;
+      expect(el.tag, 'blockquote');
+      expect(el.textContent.contains('这是提示'), isTrue);
+      expect(el.textContent.contains('[!NOTE]'), isFalse);
     });
   });
 

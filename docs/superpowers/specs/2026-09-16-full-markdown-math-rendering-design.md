@@ -142,8 +142,17 @@ markdown/
 里，实测会崩在 `_addParentInlineIfNeeded`（`Null check operator used on a null
 value`）——模型输出 `> [!NOTE]` 时整个气泡渲染失败。
 
-`SafeAlertBlockSyntax` 继承它、复用全部解析逻辑，只把根元素重建成 `section`
-（白名单内）。代价是必须 `import 'package:markdown/src/...'` 内部路径，已用
+`SafeAlertBlockSyntax` 继承它、复用全部解析逻辑（含 `[!TYPE]` → `Note` 的标题映射
+与子块解析），只把根元素换成白名单内的 `blockquote`。
+
+真机截图纠正了一个初版判断：一开始换成 `section`，同样在白名单内，但
+flutter_markdown 的块级元素**一旦注册 builder，builder 的返回值会整体替换已构建
+好的子节点**（builder 拿不到 children）；`section` 又没有自带样式，真机上渲染出来
+是一段没有边框、`Note` 标题看起来像正文的平铺文字。`blockquote` 自带左侧竖线，
+才让 alert 在视觉上与其后的正文区分开。该约束已用解析层用例锁死（断言 tag 为
+`blockquote`）。
+
+代价是必须 `import 'package:markdown/src/...'` 内部路径，已用
 `// ignore_for_file: implementation_imports` 显式标注并有测试兜底。
 
 ## 数据流
@@ -195,9 +204,36 @@ value`）——模型输出 `> [!NOTE]` 时整个气泡渲染失败。
 
 这些测试跑在 `flutter test` 下，无需真机。
 
+## 真机验证
+
+`integration_test/markdown_device_test.dart` 跑在真实设备上（Pixel 5 / Android 16），
+覆盖宿主 `flutter test` 覆盖不到的一层：真实引擎、真实字体加载、APK 内的资源打包。
+flutter_math_fork 的 KaTeX 字体是随包 asset，打包缺失时公式会渲染成方框。
+
+运行方式：
+
+```
+flutter test integration_test/markdown_device_test.dart -d <device-id>
+```
+
+加 `--dart-define=HOLD_SCREENSHOT=true` 会让用例渲染后停留 20s，便于外部
+`adb exec-out screencap` 抓图。
+
+同时确认 APK 内 `assets/flutter_assets/packages/flutter_math_fork/lib/katex_fonts/`
+下的 20 个字体文件齐全。
+
 ## 验收
 
 - `flutter analyze`：新增文件零告警（全仓 info 数由基线 63 降至 50，剩余均为既有）
-- `flutter test` 全绿：基线 194 项 → 227 项（+33）
+- `flutter test` 全绿：基线 194 项 → 228 项（+34）
+- 真机 `integration_test` 4 项全绿；真机截图确认明暗两种主题下公式、表格、
+  列表、alert callout、行内代码与非公式美元符号均正常
 - 版本号 1.9.0+41 → 1.10.0+42
 - 产出 PR
+
+### 构建环境注意
+
+本机默认 JDK 是 26，AGP 8.11.1 不接受，`flutter build apk` 会以
+`What went wrong: 26.0.2.1`（即 `java -version` 的输出）失败——这是既有环境问题，
+与本次改动无关，未改动的 `main` 分支同样失败。构建时用
+`JAVA_HOME=/usr/lib/jvm/java-17-openjdk` 即可，无需改系统默认 JDK。
