@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/chat_provider.dart';
 import '../util/key_mask.dart';
+import '../design/tokens.dart';
+import '../widgets/account_form.dart';
 
 /// 添加 / 编辑账户。add 模式 editId=null；edit 模式传已有账户字段。
 class AccountEditorScreen extends ConsumerStatefulWidget {
@@ -81,69 +83,48 @@ class _AccountEditorScreenState extends ConsumerState<AccountEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppColors.of(context);
     final tokenPreview = (_isEdit && !_revealed && _tokenCtrl.text.isNotEmpty)
         ? maskKey(_tokenCtrl.text)
         : null;
     return Scaffold(
       appBar: AppBar(title: Text(_isEdit ? '编辑账户' : '添加账户')),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: _labelCtrl,
-                decoration: _dec('名称（可选）'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _serverCtrl,
-                keyboardType: TextInputType.url,
-                decoration: _dec('服务器地址', hint: 'https://your-host/api/v1/botapi'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _tokenCtrl,
-                obscureText: !_revealed,
-                decoration: _dec('Token',
-                    suffix: IconButton(
-                      icon: Icon(
-                          _revealed
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          size: 20),
-                      onPressed: () => setState(() => _revealed = !_revealed),
-                    )),
+              Text(_isEdit ? '修改连接信息后会自动重连' : '添加一个新的 BotAPI 连接',
+                  style: TextStyle(fontSize: 13.5, color: c.textSecondary)),
+              const SizedBox(height: 16),
+              AccountFormFields(
+                labelCtrl: _labelCtrl,
+                serverCtrl: _serverCtrl,
+                tokenCtrl: _tokenCtrl,
+                revealed: _revealed,
+                onToggleReveal: () => setState(() => _revealed = !_revealed),
+                onSubmit: _saving ? null : _save,
               ),
               if (tokenPreview != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('当前: $tokenPreview',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  padding: const EdgeInsets.only(top: 8, left: 4),
+                  child: Text('当前：$tokenPreview',
+                      style: TextStyle(fontSize: 12, color: c.textTertiary),
                       overflow: TextOverflow.ellipsis),
                 ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(_error!,
-                      style: const TextStyle(color: Colors.redAccent)),
-                ),
-              const SizedBox(height: 24),
+              if (_error != null) FormErrorText(_error!),
+              const SizedBox(height: 28),
               FilledButton(
                 onPressed: _saving ? null : _save,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
                 child: _saving
                     ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(_isEdit ? '保存' : '添加',
-                        style: const TextStyle(fontSize: 16)),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Text(_isEdit ? '保存' : '添加'),
               ),
             ],
           ),
@@ -151,15 +132,4 @@ class _AccountEditorScreenState extends ConsumerState<AccountEditorScreen> {
       ),
     );
   }
-
-  InputDecoration _dec(String label, {String? hint, Widget? suffix}) =>
-      InputDecoration(
-        labelText: label,
-        hintText: hint,
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        suffixIcon: suffix,
-      );
 }

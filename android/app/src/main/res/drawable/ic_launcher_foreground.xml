@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标前景：对话气泡 + 机器人表情（位于 66dp 安全区内）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 天线 -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M52.5,26h3v8h-3z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M50.5,25a3.5,3.5 0,1 0,7 0a3.5,3.5 0,1 0,-7 0z" />
+    <!-- 气泡主体 -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M43,33H65A13,13 0,0 1,78 46V58A13,13 0,0 1,65 71H43A13,13 0,0 1,30 58V46A13,13 0,0 1,43 33z" />
+    <!-- 气泡尾巴 -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M35,64L33,81L49,70z" />
+    <!-- 眼睛 -->
+    <path android:fillColor="#FF5B4BD6"
+        android:pathData="M40.5,50a4.5,4.5 0,1 0,9 0a4.5,4.5 0,1 0,-9 0z" />
+    <path android:fillColor="#FF5B4BD6"
+        android:pathData="M58.5,50a4.5,4.5 0,1 0,9 0a4.5,4.5 0,1 0,-9 0z" />
+    <!-- 微笑 -->
+    <path android:fillColor="#00000000"
+        android:strokeColor="#FF5B4BD6"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M47.5,59Q54,64.5 60.5,59" />
+</vector>

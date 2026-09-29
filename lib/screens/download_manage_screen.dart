@@ -1,6 +1,7 @@
 // lib/screens/download_manage_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../design/tokens.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -93,9 +94,9 @@ class _DownloadManageScreenState extends ConsumerState<DownloadManageScreen> {
       };
 
   Color _tintFor(DownloadCategory c) => switch (c) {
-        DownloadCategory.image => const Color(0xFF1676F2),
-        DownloadCategory.audio => const Color(0xFF5B4BD6),
-        DownloadCategory.file => const Color(0xFF34A853),
+        DownloadCategory.image => const Color(0xFF3B82F6),
+        DownloadCategory.audio => const Color(0xFF6D5DF0),
+        DownloadCategory.file => const Color(0xFF16A37F),
       };
 
   Future<void> _open(DownloadEntry e) async {
@@ -131,7 +132,7 @@ class _DownloadManageScreenState extends ConsumerState<DownloadManageScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('分享失败: $err'),
-          backgroundColor: Colors.redAccent));
+          backgroundColor: AppColors.of(context).error));
     }
   }
 
@@ -161,10 +162,11 @@ class _DownloadManageScreenState extends ConsumerState<DownloadManageScreen> {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final bg = dark ? const Color(0xFF121215) : const Color(0xFFEDEDED);
-    final card = dark ? const Color(0xFF1C1C1E) : Colors.white;
-    final fg = dark ? Colors.white : const Color(0xFF1A1A24);
-    final sub = dark ? const Color(0xFFAEAEB2) : const Color(0xFF8A8A93);
+    final c = AppColors.of(context);
+    final bg = c.background;
+    final card = c.surface;
+    final fg = c.textPrimary;
+    final sub = c.textSecondary;
 
     final totalSize = _entries.fold<int>(0, (acc, e) {
       final f = File(e.path);
@@ -175,10 +177,7 @@ class _DownloadManageScreenState extends ConsumerState<DownloadManageScreen> {
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: dark ? const Color(0xFF1C1C1E) : Colors.white,
-        elevation: 0,
-        foregroundColor: fg,
-        title: const Text('下载管理', style: TextStyle(fontSize: 17)),
+        title: const Text('下载管理'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -213,7 +212,8 @@ class _DownloadManageScreenState extends ConsumerState<DownloadManageScreen> {
                     child: _visible.isEmpty
                         ? _EmptyState(sub: sub)
                         : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
+                            padding: EdgeInsets.fromLTRB(12, 6, 12,
+                                24 + MediaQuery.paddingOf(context).bottom),
                             itemCount: _visible.length,
                             itemBuilder: (_, i) => _entryTile(
                                 _visible[i], fg, sub, card, dark),
@@ -229,7 +229,8 @@ class _DownloadManageScreenState extends ConsumerState<DownloadManageScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
           color: card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.of(context).border, width: 0.5),
         ),
         child: ListTile(
           leading: e.category == DownloadCategory.image &&
@@ -307,7 +308,9 @@ class _TabBar extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
-                  color: selected == i ? const Color(0xFF5B4BD6) : Colors.transparent,
+                  color: selected == i
+                      ? AppColors.of(context).primary
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(9),
                 ),
                 child: Text(
@@ -334,8 +337,7 @@ class _ActionIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final sub = dark ? const Color(0xFFAEAEB2) : const Color(0xFF8A8A93);
+    final sub = AppColors.of(context).textSecondary;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: GestureDetector(

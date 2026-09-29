@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import '../design/tokens.dart';
 import '../main.dart';
+import '../providers/chat_provider.dart';
 import '../providers/config_provider.dart';
 import '../services/config_service.dart';
 import '../services/cache_service.dart';
@@ -74,7 +76,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('清理缓存'),
-        content: Text('当前缓存: $_cacheSize，确定清理？'),
+        content: Text('附件缓存 $_cacheSize。清理会同时删除本地消息记录，'
+            '服务器上保留的历史会在重连后重新同步。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -91,6 +94,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (await cacheDir.exists()) await cacheDir.delete(recursive: true);
       final cacheService = CacheService();
       await cacheService.clearAll();
+      // 库已清空，但聊天页内存里的消息列表仍是旧的（分页 offset 随之错位、
+      // 旧行的 localPath 指向已删文件）。重连一次：从空库重载并按服务端历史补齐。
+      ref.read(chatProvider.notifier).connect();
       if (mounted) {
         setState(() => _cacheSize = '0 KB');
         ScaffoldMessenger.of(context)
@@ -101,73 +107,222 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppColors.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
+        padding: EdgeInsets.fromLTRB(
+            16, 8, 16, 32 + MediaQuery.paddingOf(context).bottom),
         children: [
-          Consumer(builder: (context, ref, _) {
-            final currentMode = ref.watch(themeModeProvider);
-            return ListTile(
-              title: const Text('主题模式'),
-              subtitle: Text(currentMode == ThemeMode.light
-                  ? '白天'
-                  : currentMode == ThemeMode.dark
-                      ? '夜间'
-                      : '跟随系统'),
-              trailing: DropdownButton<ThemeMode>(
-                value: currentMode,
-                underline: const SizedBox(),
-                items: const [
-                  DropdownMenuItem(
-                      value: ThemeMode.system, child: Text('自动')),
-                  DropdownMenuItem(value: ThemeMode.light, child: Text('白天')),
-                  DropdownMenuItem(value: ThemeMode.dark, child: Text('夜间')),
-                ],
-                onChanged: (v) async {
-                  if (v != null) {
-                    await _config.setThemeMode(v);
-                    ref.read(themeModeProvider.notifier).state = v;
-                  }
-                },
-              ),
-            );
-          }),
+          _Section(title: '外观', children: [
+            Consumer(builder: (context, ref, _) {
+              final currentMode = ref.watch(themeModeProvider);
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      _IconTile(icon: Icons.palette_outlined, color: c.primary),
+                      const SizedBox(width: 14),
+                      Text('主题模式',
+                          style: TextStyle(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w500,
+                              color: c.textPrimary)),
+                    ]),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<ThemeMode>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                              value: ThemeMode.system,
+                              label: Text('跟随系统')),
+                          ButtonSegment(
+                              value: ThemeMode.light,
+                              label: Text('白天')),
+                          ButtonSegment(
+                              value: ThemeMode.dark,
+                              label: Text('夜间')),
+                        ],
+                        selected: {currentMode},
+                        onSelectionChanged: (v) async {
+                          final mode = v.first;
+                          await _config.setThemeMode(mode);
+                          ref.read(themeModeProvider.notifier).state = mode;
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ]),
           if (_oemGuide != null && _oemGuide!.needsGuide)
-            ListTile(
-              leading: Icon(Icons.bolt_rounded,
-                  color: Theme.of(context).colorScheme.primary, size: 22),
-              title: const Text('后台运行设置'),
-              subtitle: Text(_oemGuide!.reason,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, height: 1.3)),
-              trailing: const Icon(Icons.chevron_right_rounded, size: 20),
-              onTap: _showOemGuide,
+            _Section(title: '后台运行', children: [
+              _Tile(
+                icon: Icons.bolt_rounded,
+                color: c.warning,
+                title: '后台运行设置',
+                subtitle: _oemGuide!.reason,
+                onTap: _showOemGuide,
+              ),
+            ]),
+          _Section(title: '存储', children: [
+            _Tile(
+              icon: Icons.download_for_offline_outlined,
+              color: const Color(0xFF16A37F),
+              title: '下载管理',
+              subtitle: '管理 AstrBot 发送的图片、文件、音频',
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const DownloadManageScreen())),
             ),
-          const Divider(),
-          ListTile(
-            leading: Icon(Icons.download_for_offline_rounded,
-                color: Theme.of(context).colorScheme.primary, size: 22),
-            title: const Text('下载管理'),
-            subtitle: const Text('管理 astrbot 发送的图片、文件、音频'),
-            trailing: const Icon(Icons.chevron_right_rounded, size: 20),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const DownloadManageScreen())),
+            _Tile(
+              icon: Icons.cleaning_services_outlined,
+              color: const Color(0xFFE58A12),
+              title: '清理缓存',
+              subtitle: '附件缓存与本地消息记录',
+              trailingText: _cacheSize,
+              onTap: _clearCache,
+            ),
+          ]),
+          _Section(title: '关于', children: [
+            _Tile(
+              icon: Icons.info_outline_rounded,
+              color: c.primary,
+              title: 'Bot助手',
+              subtitle: _currentVersion.isEmpty
+                  ? '检查更新'
+                  : '版本 v$_currentVersion · 点击检查更新',
+              onTap: () => showDialog<void>(
+                  context: context, builder: (_) => const _UpdateDialog()),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// 分组卡片：小标题 + 圆角容器，内部条目间以细线分隔。
+class _Section extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+  const _Section({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final items = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) {
+        items.add(Divider(height: 1, indent: 62, color: c.divider));
+      }
+      items.add(children[i]);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 6, bottom: 8),
+            child: Text(title,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: c.textSecondary)),
           ),
-          ListTile(
-            title: const Text('清理缓存'),
-            subtitle: Text('当前: $_cacheSize'),
-            onTap: _clearCache,
-          ),
-          ListTile(
-            title: const Text('关于'),
-            subtitle: Text(_currentVersion.isEmpty
-                ? '检查更新'
-                : 'Bot助手 v$_currentVersion · 点击检查更新'),
-            onTap: () => showDialog<void>(
-                context: context, builder: (_) => const _UpdateDialog()),
+          Material(
+            color: c.surface,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                side: BorderSide(color: c.border, width: 0.5)),
+            clipBehavior: Clip.antiAlias,
+            child: Column(children: items),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _IconTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  const _IconTile({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.13),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, size: 18, color: color),
+      );
+}
+
+class _Tile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String? subtitle;
+  final String? trailingText;
+  final VoidCallback onTap;
+  const _Tile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    this.subtitle,
+    this.trailingText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 13, 10, 13),
+        child: Row(children: [
+          _IconTile(icon: icon, color: color),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w500,
+                        color: c.textPrimary)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12.5, height: 1.35, color: c.textSecondary)),
+                ],
+              ],
+            ),
+          ),
+          if (trailingText != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text(trailingText!,
+                  style: TextStyle(fontSize: 13, color: c.textTertiary)),
+            ),
+          Icon(Icons.chevron_right_rounded, size: 22, color: c.textTertiary),
+        ]),
       ),
     );
   }
@@ -289,7 +444,8 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text('大小:${info.sizeLabel}  当前:v${_check!.currentVersion}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: TextStyle(
+                          fontSize: 12, color: AppColors.of(context).textTertiary)),
                 ),
               Text(notes, style: const TextStyle(fontSize: 13, height: 1.4)),
             ]));
@@ -302,7 +458,9 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
         return Column(mainAxisSize: MainAxisSize.min, children: [
           LinearProgressIndicator(value: _progress > 0 ? _progress : null),
           const SizedBox(height: 10),
-          Text('$pct%', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text('$pct%',
+              style: TextStyle(
+                  fontSize: 12, color: AppColors.of(context).textTertiary)),
         ]);
       case _S.installing:
         return const Column(mainAxisSize: MainAxisSize.min, children: [

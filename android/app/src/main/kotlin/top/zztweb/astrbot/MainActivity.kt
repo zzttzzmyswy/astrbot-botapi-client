@@ -3,9 +3,12 @@ package top.zztweb.astrbot
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.graphics.Color
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -14,6 +17,20 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val installChannel = "top.zztweb.astrbot/install"
     private val deviceChannel = "top.zztweb.astrbot/device"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // 沉浸式：让 Flutter 内容绘制到状态栏/导航栏下方（由 AppBar/SafeArea 让位），
+        // 系统栏背景透明。否则状态栏区域是一条黑带，浅色主题下深色状态栏图标不可见。
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        @Suppress("DEPRECATION")
+        window.statusBarColor = Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        super.onCreate(savedInstanceState)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

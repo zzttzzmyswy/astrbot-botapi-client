@@ -1,5 +1,6 @@
 // lib/screens/chat/slash_suggestion.dart
 import 'package:flutter/material.dart';
+import '../../design/tokens.dart';
 
 /// 内置斜杠命令(名称 + 说明)。
 class SlashCommand {
@@ -22,19 +23,20 @@ class SlashSuggestionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFFFFFFF);
-    final fg = isDark ? Colors.white : const Color(0xFF1C1C1E);
-    final sub = isDark ? const Color(0xFF9E9EA4) : const Color(0xFF8A8A8E);
-    final accent = const Color(0xFF5B4BD6);
-    final div = isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE5E5EA);
+    final c = AppColors.forDark(isDark);
+    final bg = c.surface;
+    final fg = c.textPrimary;
+    final sub = c.textSecondary;
+    final accent = c.primary;
+    final div = c.border;
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(left: 8, right: 8, bottom: 4),
+        margin: const EdgeInsets.only(left: 10, right: 10, bottom: 6),
         constraints: const BoxConstraints(maxHeight: 220),
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: div, width: 0.5),
           boxShadow: [
             BoxShadow(
@@ -44,6 +46,7 @@ class SlashSuggestionPanel extends StatelessWidget {
                 offset: const Offset(0, 2)),
           ],
         ),
+        clipBehavior: Clip.antiAlias,
         child: ListView.separated(
           shrinkWrap: true,
           padding: const EdgeInsets.symmetric(vertical: 4),
