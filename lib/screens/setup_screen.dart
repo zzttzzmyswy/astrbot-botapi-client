@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/chat_provider.dart';
 import 'chat_screen.dart';
+import '../design/tokens.dart';
+import '../widgets/account_form.dart';
 
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
@@ -53,82 +55,97 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Icon(Icons.smart_toy_rounded,
-                  size: 56, color: Color(0xFF4A9EFF)),
-              const SizedBox(height: 12),
-              const Text('欢迎使用 Bot助手',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 8),
-              const Text('添加一个 botapi 账户即可开始',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 32),
-              _field('名称（可选）', _labelCtrl),
-              const SizedBox(height: 12),
-              _field('服务器地址', _serverCtrl,
-                  hint: 'https://your-host/api/v1/botapi'),
-              const SizedBox(height: 12),
-              _field('Token', _tokenCtrl,
-                  obscure: !_revealed,
-                  suffix: IconButton(
-                    icon: Icon(
-                        _revealed
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                        size: 20),
-                    onPressed: () => setState(() => _revealed = !_revealed),
-                  )),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(_error!,
-                      style: const TextStyle(color: Colors.redAccent)),
-                ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _saving ? null : _onSave,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4A9EFF),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: _saving
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('开始聊天', style: TextStyle(fontSize: 16)),
+      body: Stack(children: [
+        // 顶部柔和品牌光晕，给首屏一点氛围而不抢表单注意力。
+        Positioned(
+          top: -160,
+          left: -80,
+          right: -80,
+          child: IgnorePointer(
+            child: Container(
+              height: 420,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(colors: [
+                  c.primary.withValues(alpha: isDark ? 0.28 : 0.16),
+                  c.primary.withValues(alpha: 0),
+                ]),
               ),
-            ],
+            ),
           ),
         ),
-      ),
+        SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: c.bubbleMineGradient),
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: AppShadows.mine(c.bubbleMineGradient[1]),
+                        ),
+                        child: const Icon(Icons.smart_toy_rounded,
+                            size: 40, color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text('欢迎使用 Bot助手',
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: c.textPrimary),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 8),
+                    Text('连接你的 AstrBot，随时随地对话',
+                        style: TextStyle(fontSize: 14, color: c.textSecondary),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 32),
+                    AccountFormFields(
+                      labelCtrl: _labelCtrl,
+                      serverCtrl: _serverCtrl,
+                      tokenCtrl: _tokenCtrl,
+                      revealed: _revealed,
+                      onToggleReveal: () =>
+                          setState(() => _revealed = !_revealed),
+                      onSubmit: _saving ? null : _onSave,
+                    ),
+                    if (_error != null) FormErrorText(_error!),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: _saving ? null : _onSave,
+                      child: _saving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Text('开始聊天'),
+                    ),
+                    const SizedBox(height: 16),
+                    Text('需先在 AstrBot 安装 astrbot_plugin_botapi 插件并生成 Token',
+                        style: TextStyle(fontSize: 12, color: c.textTertiary),
+                        textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ]),
     );
   }
-
-  Widget _field(String label, TextEditingController ctrl,
-          {bool obscure = false, String? hint, Widget? suffix}) =>
-      TextField(
-        controller: ctrl,
-        obscureText: obscure,
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          suffixIcon: suffix,
-          border:
-              OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        ),
-      );
 }

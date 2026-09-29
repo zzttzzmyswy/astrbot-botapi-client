@@ -252,15 +252,21 @@ class CacheService {
   }
 
   /// 读取指定账户的消息。[limit] 为 null 时加载全部；返回按时间正序。
+  ///
+  /// 同一 created_at 的多行按本地自增 id（即落库顺序）排：服务端历史时间戳只到
+  /// 秒，同一轮回复的「思考 + 正文」常落在同一秒，仅按 created_at 排序时顺序
+  /// 不确定，实测会出现「思考过程」排在回复正文之后。mergeHistory 按服务端行序
+  /// 插入、实时落库按到达顺序插入，故 id 是可靠的次序键；分页 offset 也因此稳定。
   Future<List<LocalMessage>> getMessages(
       {String? accountId, int? limit, int offset = 0}) async {
     final d = await db;
+    const order = 'created_at DESC, id DESC';
     final rows = accountId == null
-        ? await d.query('messages', orderBy: 'created_at DESC', limit: limit, offset: offset)
+        ? await d.query('messages', orderBy: order, limit: limit, offset: offset)
         : await d.query('messages',
             where: 'session_id IS ?',
             whereArgs: [accountId],
-            orderBy: 'created_at DESC',
+            orderBy: order,
             limit: limit,
             offset: offset);
     return rows.map((r) => LocalMessage.fromMap(r)).toList().reversed.toList();
@@ -311,15 +317,32 @@ class CacheService {
           orderBy: 'created_at DESC',
           limit: 1);
       if (live.isNotEmpty) {
-        await d.update('messages', {'server_id': row.messageId},
+        // 服务端已有该行 → 本地行必然已送达：同时把残留的 pending/error 置 sent，
+        // 否则重启后从库里读出的旧消息一直停在「发送中」。
+        await d.update('messages', {'server_id': row.messageId, 'status': 'sent'},
             where: 'id = ?', whereArgs: [live.first['id']]);
       } else {
+        // 服务端时间戳只到秒，而同一轮里先到的行（如已贴 id 的本地用户消息）
+        // 带毫秒。直接用 秒*1000 会让后发生的行排到先发生的行前面（实测工具
+        // 状态跑到触发它的用户消息之上）。以服务端行序为准：不早于任何
+        // server_id 更小的已存行。
+        var createdAt = row.timestamp * 1000;
+        final prev = await d.rawQuery(
+            'SELECT MAX(created_at) AS m FROM messages '
+            'WHERE session_id = ? AND server_id IS NOT NULL AND server_id < ?',
+            [accountId, row.messageId]);
+        final prevMax = (prev.first['m'] as num?)?.toInt();
+        if (prevMax != null &&
+            prevMax > createdAt &&
+            prevMax - createdAt < 1000) {
+          createdAt = prevMax;
+        }
         await d.insert('messages', {
           'msg_type': row.type, // text | thinking | tool_status（与实时一致）
           'content': row.content,
           'is_from_me': row.role == 'user' ? 1 : 0,
           'status': 'sent',
-          'created_at': row.timestamp * 1000,
+          'created_at': createdAt,
           'session_id': accountId,
           'server_id': row.messageId,
         });

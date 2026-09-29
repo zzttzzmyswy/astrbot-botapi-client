@@ -16,53 +16,86 @@ import 'package:markdown/markdown.dart' as mdp;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../util/lru_cache.dart';
+import '../../../design/tokens.dart';
 import 'alert_syntax.dart';
+import 'code_block.dart';
 import 'latex_syntax.dart';
 import 'math_builder.dart';
 
 /// 消息 Markdown 渲染缓存（按 主题 + 前景色 + 文本 分键）。
 final LruCache<String, Widget> _mdCache = LruCache(maxSize: 32);
 
-/// 共享 markdown 样式表。
-md.MarkdownStyleSheet mdStyleSheet(Color fg, bool isDark) {
+/// 共享 markdown 样式表。[mine] 为我方（主色渐变）气泡：代码底、链接、引用线
+/// 都改用前景色的半透明变体，否则浅色代码底上的白字会不可读。
+md.MarkdownStyleSheet mdStyleSheet(Color fg, bool isDark, {bool mine = false}) {
+  final c = AppColors.forDark(isDark);
+  final inlineCodeBg =
+      mine ? Colors.white.withValues(alpha: 0.18) : c.surfaceMuted;
+  final link = mine ? fg : c.link;
+  final accent = mine ? fg.withValues(alpha: 0.6) : c.primary;
+  final body = TextStyle(color: fg, fontSize: 15.5, height: 1.55);
   return md.MarkdownStyleSheet(
-    p: TextStyle(color: fg, fontSize: 16, height: 1.35),
-    h1: TextStyle(color: fg, fontSize: 20, fontWeight: FontWeight.bold),
-    h2: TextStyle(color: fg, fontSize: 18, fontWeight: FontWeight.bold),
-    h3: TextStyle(color: fg, fontSize: 17, fontWeight: FontWeight.bold),
-    a: const TextStyle(
-        color: Color(0xFF4A8FE7),
+    p: body,
+    pPadding: EdgeInsets.zero,
+    blockSpacing: 10,
+    h1: TextStyle(
+        color: fg, fontSize: 21, height: 1.35, fontWeight: FontWeight.w700),
+    h2: TextStyle(
+        color: fg, fontSize: 19, height: 1.35, fontWeight: FontWeight.w700),
+    h3: TextStyle(
+        color: fg, fontSize: 17, height: 1.4, fontWeight: FontWeight.w700),
+    h4: TextStyle(
+        color: fg, fontSize: 16, height: 1.4, fontWeight: FontWeight.w600),
+    h5: TextStyle(
+        color: fg, fontSize: 15.5, height: 1.4, fontWeight: FontWeight.w600),
+    h6: TextStyle(
+        color: fg.withValues(alpha: 0.75),
+        fontSize: 15,
+        height: 1.4,
+        fontWeight: FontWeight.w600),
+    a: TextStyle(
+        color: link,
+        fontWeight: FontWeight.w500,
         decoration: TextDecoration.underline,
-        decorationColor: Color(0xFF4A8FE7)),
+        decorationColor: link.withValues(alpha: 0.5)),
     code: TextStyle(
         color: fg,
-        fontSize: 14,
+        fontSize: 13.5,
         fontFamily: 'monospace',
-        backgroundColor:
-            isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE8E8EC)),
-    codeblockDecoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7),
-        borderRadius: BorderRadius.circular(8)),
+        backgroundColor: inlineCodeBg),
+    // 代码块由 CodeBlockBuilder 自绘（圆角底 + 语言标签 + 复制），这里置空，
+    // 避免 flutter_markdown 再套一层装饰。
+    codeblockDecoration: const BoxDecoration(),
+    codeblockPadding: EdgeInsets.zero,
     blockquoteDecoration: BoxDecoration(
-        border: Border(
-            left: BorderSide(color: fg.withValues(alpha: 0.35), width: 3))),
-    blockquotePadding: const EdgeInsets.only(left: 12),
-    tableBorder:
-        TableBorder.all(color: fg.withValues(alpha: 0.2), width: 0.5),
+      color: mine
+          ? Colors.white.withValues(alpha: 0.10)
+          : c.primary.withValues(alpha: isDark ? 0.10 : 0.06),
+      border: Border(left: BorderSide(color: accent, width: 3)),
+    ),
+    blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+    blockquote: body.copyWith(color: fg.withValues(alpha: 0.9)),
+    tableBorder: TableBorder.all(
+        color: mine ? fg.withValues(alpha: 0.25) : c.border, width: 0.8),
     tableHead:
-        TextStyle(color: fg, fontWeight: FontWeight.bold, fontSize: 14),
-    tableBody: TextStyle(color: fg, fontSize: 14),
+        TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 14),
+    tableHeadAlign: TextAlign.left,
+    tableBody: TextStyle(color: fg, fontSize: 14, height: 1.4),
+    tableCellsDecoration: BoxDecoration(
+        color: mine ? Colors.white.withValues(alpha: 0.06) : c.codeBg),
     tableCellsPadding:
-        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
     horizontalRuleDecoration: BoxDecoration(
-        border:
-            Border(top: BorderSide(color: fg.withValues(alpha: 0.2)))),
-    strong:
-        TextStyle(color: fg, fontWeight: FontWeight.bold, fontSize: 16),
-    em: TextStyle(
-        color: fg, fontStyle: FontStyle.italic, fontSize: 16),
-    listBullet: TextStyle(color: fg, fontSize: 16),
-    listIndent: 16,
+        border: Border(
+            top: BorderSide(
+                color: mine ? fg.withValues(alpha: 0.3) : c.border,
+                width: 1))),
+    strong: TextStyle(color: fg, fontWeight: FontWeight.w700),
+    em: TextStyle(color: fg, fontStyle: FontStyle.italic),
+    del: TextStyle(color: fg, decoration: TextDecoration.lineThrough),
+    listBullet: TextStyle(color: accent, fontSize: 15.5, height: 1.55),
+    listIndent: 20,
+    checkbox: TextStyle(color: accent, fontSize: 17),
   );
 }
 
@@ -77,31 +110,34 @@ void launchMarkdownUrl(String text, String? href, String title) {
 }
 
 /// 把消息文本渲染成可选中、带公式支持的 Markdown widget。
-Widget buildMarkdown(String text, Color fg, bool isDark) {
+Widget buildMarkdown(String text, Color fg, bool isDark, {bool mine = false}) {
   if (text.isEmpty) return const SizedBox.shrink();
-  final key = '${isDark ? 'd' : 'l'}_${fg.toARGB32()}_$text';
+  final key = '${isDark ? 'd' : 'l'}${mine ? 'm' : 'o'}_${fg.toARGB32()}_$text';
   final cached = _mdCache[key];
   if (cached != null) return cached;
 
   final built = _hasMarkdown(text)
-      ? SelectionArea(child: _markdownBody(text, fg, isDark))
+      ? SelectionArea(child: _markdownBody(text, fg, isDark, mine))
       : SelectableText(text,
-          style: TextStyle(color: fg, fontSize: 16, height: 1.35));
+          style: TextStyle(color: fg, fontSize: 15.5, height: 1.55));
 
   _mdCache[key] = built;
   return built;
 }
 
-md.MarkdownBody _markdownBody(String text, Color fg, bool isDark) {
+md.MarkdownBody _markdownBody(String text, Color fg, bool isDark, bool mine) {
   return md.MarkdownBody(
     data: text,
     selectable: false,
-    styleSheet: mdStyleSheet(fg, isDark),
+    styleSheet: mdStyleSheet(fg, isDark, mine: mine),
     onTapLink: launchMarkdownUrl,
     extensionSet: mdp.ExtensionSet.gitHubWeb,
     inlineSyntaxes: kLatexInlineSyntaxes,
     blockSyntaxes: [...kAlertBlockSyntaxes, ...kLatexBlockSyntaxes],
-    builders: latexBuilders(fg: fg, isDark: isDark),
+    builders: {
+      ...latexBuilders(fg: fg, isDark: isDark),
+      'pre': CodeBlockBuilder(fg: fg, isDark: isDark, mine: mine),
+    },
   );
 }
 

@@ -1,6 +1,7 @@
 // lib/screens/chat/voice_overlay.dart
 import 'dart:math';
 import 'package:flutter/material.dart';
+import '../../design/tokens.dart';
 
 class VoiceOverlay extends StatefulWidget {
   final double amplitude;
@@ -48,24 +49,19 @@ class _VoiceOverlayState extends State<VoiceOverlay>
   @override
   Widget build(BuildContext context) {
     final cancel = widget.isCancel;
-    final accent = cancel ? Colors.redAccent : const Color(0xFF5B4BD6);
+    final c = AppColors.forDark(widget.isDark);
+    final accent = cancel ? c.error : c.primary;
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (_, __) {
         final t = _ctrl.value;
         final amp = (widget.amplitude.clamp(0.0, 1.0)) * 0.75 + 0.20;
-        return Container(
-          height: 60,
+        return AnimatedContainer(
+          duration: AppMotion.fast,
+          height: 64,
           decoration: BoxDecoration(
-            color: widget.isDark
-                ? const Color(0xFF1C1C1E)
-                : const Color(0xFFF7F7F8),
-            border: Border(
-                top: BorderSide(
-                    color: widget.isDark
-                        ? const Color(0xFF3A3A3C)
-                        : const Color(0xFFE0E0E5),
-                    width: 0.5)),
+            color: cancel ? c.error.withValues(alpha: 0.08) : c.surface,
+            border: Border(top: BorderSide(color: c.divider, width: 0.5)),
           ),
           child: SafeArea(
             top: false,
@@ -97,16 +93,16 @@ class _VoiceOverlayState extends State<VoiceOverlay>
                     child: Row(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.center,
-                        children: List.generate(5, (i) {
-                          final phase = t * 2 * pi + i * 0.6;
+                        children: List.generate(9, (i) {
+                          final phase = t * 2 * pi + i * 0.7;
                           final wave = 0.5 + 0.5 * sin(phase);
                           final h =
                               (8 + wave * 20 * amp).clamp(6.0, 28.0);
                           return Padding(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 3),
+                                horizontal: 2),
                             child: Container(
-                              width: 5,
+                              width: 4,
                               height: h,
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
@@ -125,20 +121,25 @@ class _VoiceOverlayState extends State<VoiceOverlay>
                 const SizedBox(width: 12),
                 Text(_fmt(_sw.elapsed),
                     style: TextStyle(
-                        color: widget.isDark
-                            ? Colors.white
-                            : const Color(0xFF333333),
-                        fontSize: 14,
+                        color: c.textPrimary,
+                        fontSize: 15,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                         fontWeight: FontWeight.w600)),
                 const Spacer(),
-                Text(cancel ? '松开取消' : '上划取消',
-                    style: TextStyle(
-                        color: cancel
-                            ? Colors.redAccent
-                            : (widget.isDark
-                                ? Colors.white54
-                                : const Color(0xFF9E9E9E)),
-                        fontSize: 12)),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                      cancel
+                          ? Icons.close_rounded
+                          : Icons.keyboard_arrow_up_rounded,
+                      size: 16,
+                      color: cancel ? c.error : c.textTertiary),
+                  const SizedBox(width: 2),
+                  Text(cancel ? '松开取消' : '上划取消',
+                      style: TextStyle(
+                          color: cancel ? c.error : c.textTertiary,
+                          fontWeight: cancel ? FontWeight.w600 : null,
+                          fontSize: 12.5)),
+                ]),
               ]),
             ),
           ),

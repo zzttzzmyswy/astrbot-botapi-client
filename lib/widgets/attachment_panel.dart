@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../design/tokens.dart';
 import '../util/mime.dart';
 
 class AttachmentPanel extends ConsumerStatefulWidget {
@@ -24,41 +25,29 @@ class _AttachmentPanelState extends ConsumerState<AttachmentPanel> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    final handleColor = isDark ? const Color(0xFF4A4A4E) : const Color(0xFFD1D1D6);
-    final labelColor = isDark ? const Color(0xFFAEAEB2) : const Color(0xFF6B6B70);
+    final c = AppColors.of(context);
+    final bg = c.surface;
+    final labelColor = c.textSecondary;
 
     return Container(
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.07),
-            blurRadius: 14,
-            offset: const Offset(0, -3),
-          ),
-        ],
+        border: Border(top: BorderSide(color: c.divider, width: 0.5)),
       ),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Drag handle
-            Container(
-              margin: const EdgeInsets.only(top: 8, bottom: 6),
-              width: 38, height: 4,
-              decoration: BoxDecoration(color: handleColor, borderRadius: BorderRadius.circular(2)),
-            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 18),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   _Option(
                     icon: Icons.camera_alt_rounded,
                     label: '拍照',
+                    tint: const Color(0xFF6D5DF0),
                     labelColor: labelColor,
                     isDark: isDark,
                     onTap: () => _capture(ImageSource.camera),
@@ -66,6 +55,7 @@ class _AttachmentPanelState extends ConsumerState<AttachmentPanel> {
                   _Option(
                     icon: Icons.photo_library_rounded,
                     label: '相册',
+                    tint: const Color(0xFF16A37F),
                     labelColor: labelColor,
                     isDark: isDark,
                     onTap: () => _capture(ImageSource.gallery),
@@ -73,6 +63,7 @@ class _AttachmentPanelState extends ConsumerState<AttachmentPanel> {
                   _Option(
                     icon: Icons.insert_drive_file_rounded,
                     label: '文件',
+                    tint: const Color(0xFFE58A12),
                     labelColor: labelColor,
                     isDark: isDark,
                     onTap: () => _pickFile(),
@@ -121,13 +112,14 @@ class _AttachmentPanelState extends ConsumerState<AttachmentPanel> {
 
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
+      SnackBar(content: Text(msg)));
   }
 }
 
 class _Option extends StatelessWidget {
   final IconData icon;
   final String label;
+  final Color tint;
   final Color labelColor;
   final bool isDark;
   final VoidCallback onTap;
@@ -135,6 +127,7 @@ class _Option extends StatelessWidget {
   const _Option({
     required this.icon,
     required this.label,
+    required this.tint,
     required this.labelColor,
     required this.isDark,
     required this.onTap,
@@ -142,10 +135,7 @@ class _Option extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Unified with the rest of the app: a single accent (the same purple used
-    // by the send button and attachment-bubble icon blocks) on a soft tinted
-    // tile, instead of per-option multi-color gradients.
-    const accent = Color(0xFF5B4BD6);
+    // 三个入口各用一个柔和的语义色（同明度、低饱和底），一眼可分又不花哨。
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -155,14 +145,14 @@ class _Option extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 56, height: 56,
+              width: 58, height: 58,
               decoration: BoxDecoration(
-                color: accent.withValues(alpha: isDark ? 0.22 : 0.10),
+                color: tint.withValues(alpha: isDark ? 0.20 : 0.11),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: Icon(icon, color: accent, size: 24),
+              child: Icon(icon, color: tint, size: 26),
             ),
-            const SizedBox(height: 7),
+            const SizedBox(height: 8),
             Text(label, style: TextStyle(color: labelColor, fontSize: 12, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
           ],
         ),

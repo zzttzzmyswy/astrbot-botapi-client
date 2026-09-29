@@ -557,7 +557,9 @@ class BotApiHttp {
   Future<File> _streamDownloadInto(
       Dio dio, File part, String absUrl, File finalFile,
       void Function(int received, int? total)? onProgress) async {
-    final start = await part.length();
+    // 首次下载时 .part 还不存在：length() 会抛 PathNotFoundException，旧实现
+    // 因此让所有首次媒体下载都失败（被外层 catch 吞成 null）。
+    final start = await part.exists() ? await part.length() : 0;
     final headers = <String, String>{..._authHeaders};
     if (start > 0) headers['Range'] = 'bytes=$start-';
     Response<ResponseBody> res;

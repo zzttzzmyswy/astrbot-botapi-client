@@ -3,9 +3,10 @@
 // 左侧账户选择栏：列表/添加/重命名/编辑凭据/删除。最多 25（上限由 provider 拦截）。
 // 点账户 tile 进入该账户的「会话面板」（两级导航：账户 → 会话）。
 // 会话面板：会话列表 + 新建/重命名/删除 + 返回；默认会话无删除按钮。
-// 风格与聊天页统一：accent 0xFF5B4BD6。
+// 配色统一取自 design/tokens.dart。
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../design/tokens.dart';
 import '../models/account.dart';
 import '../models/chat_session.dart';
 import '../providers/chat_provider.dart';
@@ -42,7 +43,7 @@ class _AccountDrawerState extends ConsumerState<AccountDrawer> {
     return Drawer(
       backgroundColor: theme.bg,
       elevation: 0,
-      width: 308,
+      width: 316,
       child: SafeArea(
         child: accounts.isEmpty
             ? _AccountListView(
@@ -144,26 +145,36 @@ class _AccountListView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+        padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
         child: Row(children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 36,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                  colors: [Color(0xFF5B4BD6), Color(0xFF7661D8)]),
-              borderRadius: BorderRadius.circular(9),
+              gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: AppColors.forDark(theme.isDark).bubbleMineGradient),
+              borderRadius: BorderRadius.circular(11),
             ),
             child: const Icon(Icons.smart_toy_rounded,
-                color: Colors.white, size: 18),
+                color: Colors.white, size: 20),
           ),
-          const SizedBox(width: 10),
-          Text('账户',
-              style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: theme.fg)),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('账户',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: theme.fg)),
+              Text('${accounts.length} 个 BotAPI 连接',
+                  style: TextStyle(fontSize: 12, color: theme.sub)),
+            ],
+          ),
           const Spacer(),
           _NewButton(
               accent: theme.accent,
@@ -177,7 +188,7 @@ class _AccountListView extends ConsumerWidget {
         child: accounts.isEmpty
             ? _Empty(sub: theme.sub)
             : ListView(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   for (final a in accounts)
                     _AccountTile(
@@ -245,9 +256,7 @@ class _AccountListView extends ConsumerWidget {
         content: TextField(
             controller: ctrl,
             autofocus: true,
-            decoration: InputDecoration(
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
+            decoration: const InputDecoration()),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
@@ -287,7 +296,7 @@ class _AccountListView extends ConsumerWidget {
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('删除',
-                  style: TextStyle(color: Colors.redAccent))),
+                  style: TextStyle(color: Color(0xFFE5484D)))),
         ],
       ),
     ).then((confirmed) async {
@@ -338,29 +347,38 @@ class _SessionPanel extends ConsumerWidget {
 
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+        padding: const EdgeInsets.fromLTRB(8, 12, 12, 12),
         child: Row(children: [
           Material(
             color: Colors.transparent,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
             child: InkWell(
-              borderRadius: BorderRadius.circular(8),
               onTap: onBack,
               child: Padding(
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(8),
                 child: Icon(Icons.arrow_back_rounded,
-                    size: 20, color: theme.fg),
+                    size: 22, color: theme.fg),
               ),
             ),
           ),
           const SizedBox(width: 4),
           Expanded(
-            child: Text(account.displayName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: theme.fg)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(account.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: theme.fg)),
+                Text('会话',
+                    style: TextStyle(fontSize: 12, color: theme.sub)),
+              ],
+            ),
           ),
           const SizedBox(width: 8),
           _NewButton(
@@ -396,7 +414,7 @@ class _SessionPanel extends ConsumerWidget {
                     ? _ErrorHint(sub: theme.sub, message: state.sessionsError!)
                     : _EmptySessions(sub: theme.sub))
                 : ListView(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     children: [
                       for (final s in sessions)
                         _SessionTile(
@@ -431,10 +449,7 @@ class _SessionPanel extends ConsumerWidget {
         content: TextField(
             controller: ctrl,
             autofocus: true,
-            decoration: InputDecoration(
-                hintText: '会话名称',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8)))),
+            decoration: const InputDecoration(hintText: '会话名称')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
@@ -459,9 +474,7 @@ class _SessionPanel extends ConsumerWidget {
         content: TextField(
             controller: ctrl,
             autofocus: true,
-            decoration: InputDecoration(
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
+            decoration: const InputDecoration()),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
@@ -490,7 +503,7 @@ class _SessionPanel extends ConsumerWidget {
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('删除',
-                  style: TextStyle(color: Colors.redAccent))),
+                  style: TextStyle(color: Color(0xFFE5484D)))),
         ],
       ),
     );
@@ -500,18 +513,18 @@ class _SessionPanel extends ConsumerWidget {
   }
 }
 
-/// 抽屉主题色板：与聊天页统一，两视图共享。
+/// 抽屉主题色板：取自全局设计令牌，两视图共享。
 class _Theme {
   final bool isDark;
   const _Theme({required this.isDark});
-  Color get accent => const Color(0xFF5B4BD6);
-  Color get bg => isDark ? const Color(0xFF151518) : const Color(0xFFFAFAFB);
-  Color get card => isDark ? const Color(0xFF212121) : const Color(0xFFF2F2F6);
-  Color get cardActive =>
-      isDark ? const Color(0xFF2A2A45) : const Color(0xFFECE9FB);
-  Color get fg => isDark ? Colors.white : const Color(0xFF1C1C1E);
-  Color get sub => isDark ? const Color(0xFF9E9EA4) : const Color(0xFF8A8A8E);
-  Color get div => isDark ? const Color(0xFF2A2A2E) : const Color(0xFFE5E5EA);
+  AppColors get _c => AppColors.forDark(isDark);
+  Color get accent => _c.primary;
+  Color get bg => _c.surface;
+  Color get card => Colors.transparent;
+  Color get cardActive => _c.primarySoft;
+  Color get fg => _c.textPrimary;
+  Color get sub => _c.textSecondary;
+  Color get div => _c.divider;
 }
 
 class _NewButton extends StatelessWidget {
@@ -528,20 +541,20 @@ class _NewButton extends StatelessWidget {
       this.label = '添加'});
   @override
   Widget build(BuildContext context) => Material(
-        color: accent,
-        borderRadius: BorderRadius.circular(10),
+        color: AppColors.forDark(isDark).primarySoft,
+        shape: const StadiumBorder(),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.add_rounded, color: Colors.white, size: 18),
-              const SizedBox(width: 2),
+              Icon(Icons.add_rounded, color: accent, size: 18),
+              const SizedBox(width: 4),
               Text(label,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
+                  style: TextStyle(
+                      color: accent,
+                      fontSize: 13.5,
                       fontWeight: FontWeight.w600)),
             ]),
           ),
@@ -575,40 +588,33 @@ class _AccountTile extends StatelessWidget {
     final initial =
         name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Material(
         color: isCurrent ? cardActive : card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+            padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
             child: Row(
               children: [
-                if (isCurrent)
-                  Container(
-                      width: 3,
-                      height: 30,
-                      decoration: BoxDecoration(
-                          color: accent,
-                          borderRadius: BorderRadius.circular(2))),
-                if (isCurrent)
-                  const SizedBox(width: 8)
-                else
-                  const SizedBox(width: 11),
                 Container(
-                    width: 38,
-                    height: 38,
+                    width: 42,
+                    height: 42,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                        color: accent, borderRadius: BorderRadius.circular(12)),
+                        gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: avatarGradientFor(name)),
+                        borderRadius: BorderRadius.circular(13)),
                     child: Text(initial,
                         style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.w700))),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -618,16 +624,16 @@ class _AccountTile extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 14.5,
+                              fontSize: 15,
                               fontWeight: isCurrent
                                   ? FontWeight.w700
                                   : FontWeight.w500,
-                              color: fg)),
-                      const SizedBox(height: 2),
+                              color: isCurrent ? accent : fg)),
+                      const SizedBox(height: 3),
                       Text(subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11.5, color: sub)),
+                          style: TextStyle(fontSize: 12, color: sub)),
                     ],
                   ),
                 ),
@@ -641,7 +647,7 @@ class _AccountTile extends StatelessWidget {
                       const PopupMenuItem(
                           value: 'delete',
                           child: Text('删除',
-                              style: TextStyle(color: Colors.redAccent))),
+                              style: TextStyle(color: Color(0xFFE5484D)))),
                   ],
                   onSelected: (v) {
                     if (v == 'rename') onRename();
@@ -680,38 +686,33 @@ class _SessionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Material(
         color: isCurrent ? cardActive : card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+            padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
             child: Row(
               children: [
-                if (isCurrent)
-                  Container(
-                      width: 3,
-                      height: 30,
-                      decoration: BoxDecoration(
-                          color: accent,
-                          borderRadius: BorderRadius.circular(2))),
-                if (isCurrent)
-                  const SizedBox(width: 8)
-                else
-                  const SizedBox(width: 11),
                 Container(
                     width: 38,
                     height: 38,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                        color: accent.withValues(alpha: 0.12),
+                        color: isCurrent
+                            ? accent.withValues(alpha: 0.16)
+                            : AppColors.forDark(isDark).surfaceMuted,
                         borderRadius: BorderRadius.circular(12)),
-                    child: Icon(Icons.forum_outlined,
-                        color: accent, size: 20)),
-                const SizedBox(width: 10),
+                    child: Icon(
+                        isCurrent
+                            ? Icons.chat_bubble_rounded
+                            : Icons.chat_bubble_outline_rounded,
+                        color: isCurrent ? accent : sub,
+                        size: 18)),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Row(
                     children: [
@@ -720,11 +721,11 @@ class _SessionTile extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                fontSize: 14.5,
+                                fontSize: 15,
                                 fontWeight: isCurrent
                                     ? FontWeight.w700
                                     : FontWeight.w500,
-                                color: fg)),
+                                color: isCurrent ? accent : fg)),
                       ),
                       if (isCurrent) ...[
                         const SizedBox(width: 6),
@@ -732,13 +733,13 @@ class _SessionTile extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 1),
                           decoration: BoxDecoration(
-                            color: accent.withValues(alpha: 0.15),
+                            color: accent,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text('当前',
                               style: TextStyle(
                                   fontSize: 10,
-                                  color: accent,
+                                  color: AppColors.forDark(isDark).onPrimary,
                                   fontWeight: FontWeight.w600)),
                         ),
                       ],
@@ -754,7 +755,7 @@ class _SessionTile extends StatelessWidget {
                       const PopupMenuItem(
                           value: 'delete',
                           child: Text('删除',
-                              style: TextStyle(color: Colors.redAccent))),
+                              style: TextStyle(color: Color(0xFFE5484D)))),
                   ],
                   onSelected: (v) {
                     if (v == 'rename') onRename();

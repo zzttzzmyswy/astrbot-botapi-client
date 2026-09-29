@@ -1,7 +1,22 @@
-// lib/screens/chat/scroll_thumb.dart
 import 'package:flutter/material.dart';
+import '../../design/tokens.dart';
 
-class ScrollThumbOverlay extends StatelessWidget {
+/// 由拖动手势在「轨道」坐标系中的位置换算滚动比例。
+///
+/// [trackY] 手指在轨道内的 y；[grabOffset] 按下时手指距滑块顶部的距离（保持
+/// 抓取点不跳）；返回 0..1。纯函数，便于单测。
+double thumbFraction({
+  required double trackY,
+  required double grabOffset,
+  required double trackHeight,
+  required double thumbHeight,
+}) {
+  final range = trackHeight - thumbHeight;
+  if (range <= 0) return 0;
+  return ((trackY - grabOffset) / range).clamp(0.0, 1.0);
+}
+
+class ScrollThumbOverlay extends StatefulWidget {
   final double fraction;
   final bool isDark;
   final String? dateLabel;
@@ -20,62 +35,84 @@ class ScrollThumbOverlay extends StatelessWidget {
   });
 
   @override
+  State<ScrollThumbOverlay> createState() => _ScrollThumbOverlayState();
+}
+
+class _ScrollThumbOverlayState extends State<ScrollThumbOverlay> {
+  final GlobalKey _trackKey = GlobalKey();
+  double _grab = 0;
+
+  @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (ctx, c) {
-      final trackHeight = c.maxHeight;
-      final thumbHeight = (trackHeight * 0.22).clamp(42.0, 130.0);
-      final clampedFrac = fraction.clamp(0.0, 1.0);
+    final c = AppColors.forDark(widget.isDark);
+    return LayoutBuilder(key: _trackKey, builder: (ctx, box) {
+      final trackHeight = box.maxHeight;
+      final thumbHeight = (trackHeight * 0.18).clamp(44.0, 110.0);
+      final clampedFrac = widget.fraction.clamp(0.0, 1.0);
       final thumbTop = (clampedFrac * (trackHeight - thumbHeight))
-          .clamp(0.0, (trackHeight - thumbHeight).clamp(1.0, double.infinity));
-      final thumbColor =
-          isDark ? const Color(0xFFB0B0B5) : const Color(0xFF8A8A8E);
+          .clamp(0.0, (trackHeight - thumbHeight).clamp(0.0, double.infinity));
+      final dragging = widget.showDate;
+
+      void update(Offset global) {
+        // 早先实现用 thumb 自身的 localPosition 除以轨道高度，手指一动滑块就
+        // 跳回顶部附近。这里统一换算到轨道坐标系，并扣除按下时的抓取偏移。
+        final rb = _trackKey.currentContext?.findRenderObject() as RenderBox?;
+        if (rb == null) return;
+        final y = rb.globalToLocal(global).dy;
+        widget.onDrag?.call(thumbFraction(
+            trackY: y,
+            grabOffset: _grab,
+            trackHeight: trackHeight,
+            thumbHeight: thumbHeight));
+      }
 
       return Stack(fit: StackFit.expand, children: [
-        if (showDate && dateLabel != null)
-          Center(
+        if (widget.showDate && widget.dateLabel != null)
+          Positioned(
+            right: 40,
+            top: (thumbTop + thumbHeight / 2 - 18)
+                .clamp(0.0, (trackHeight - 36).clamp(0.0, double.infinity)),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              height: 36,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF2A2A2E) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2)),
-                ],
+                color: c.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: c.border, width: 0.5),
+                boxShadow: AppShadows.card(widget.isDark),
               ),
               child: Text(
-                dateLabel!,
+                widget.dateLabel!,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: 13.5,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : const Color(0xFF1C1C1E),
+                  color: c.textPrimary,
                 ),
               ),
             ),
           ),
         Positioned(
-          right: 3,
+          right: 2,
           top: thumbTop,
-          width: 26,
+          width: 28,
           height: thumbHeight,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onVerticalDragUpdate: (d) {
-              final h = trackHeight <= 0 ? 1.0 : trackHeight;
-              final frac = (d.localPosition.dy / h).clamp(0.0, 1.0);
-              onDrag?.call(frac);
-            },
-            onVerticalDragEnd: (_) => onDragEnd?.call(),
+            onVerticalDragStart: (d) => _grab = d.localPosition.dy,
+            onVerticalDragUpdate: (d) => update(d.globalPosition),
+            onVerticalDragEnd: (_) => widget.onDragEnd?.call(),
+            onVerticalDragCancel: () => widget.onDragEnd?.call(),
             child: Center(
-              child: Container(
-                width: 4,
-                height: thumbHeight * 0.6,
+              child: AnimatedContainer(
+                duration: AppMotion.fast,
+                width: dragging ? 6 : 4,
+                height: thumbHeight * 0.7,
                 decoration: BoxDecoration(
-                  color: thumbColor.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(2),
+                  color: dragging
+                      ? c.primary
+                      : c.textTertiary.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(3),
                 ),
               ),
             ),

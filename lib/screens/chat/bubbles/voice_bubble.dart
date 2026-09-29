@@ -1,6 +1,7 @@
 // lib/screens/chat/bubbles/voice_bubble.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../design/tokens.dart';
 import '../../../models/message.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../services/audio_playback_service.dart';
@@ -21,7 +22,8 @@ class _VoiceBubbleState extends ConsumerState<VoiceBubble> {
   @override
   Widget build(BuildContext context) {
     final fg = widget.fg;
-    final accent = const Color(0xFF5B4BD6);
+    final c = AppColors.of(context);
+    final accent = c.primary;
     final onBubble = widget.isMe ? Colors.white : accent;
     final m = widget.m;
     final pb = ref.watch(audioPlaybackProvider);
@@ -68,15 +70,15 @@ class _VoiceBubbleState extends ConsumerState<VoiceBubble> {
             height: 30,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-                color: Colors.redAccent.withValues(alpha: 0.15),
+                color: c.error.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8)),
-            child: const Icon(Icons.refresh_rounded,
-                color: Colors.redAccent, size: 18),
+            child: Icon(Icons.refresh_rounded,
+                color: c.error, size: 18),
           ),
           const SizedBox(width: 10),
-          Text('发送失败,点击重试',
+          Text('发送失败，点击重试',
               style: TextStyle(
-                  color: Colors.redAccent,
+                  color: c.error,
                   fontSize: 13,
                   fontWeight: FontWeight.w500)),
         ]),
@@ -100,17 +102,22 @@ class _VoiceBubbleState extends ConsumerState<VoiceBubble> {
 
     return Row(mainAxisSize: MainAxisSize.min, children: [
       if (loading)
-        const SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(strokeWidth: 2))
+        SizedBox(
+            width: 36,
+            height: 36,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(onBubble)),
+            ))
       else
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => player.toggle(m),
           child: Container(
-            width: 30,
-            height: 30,
+            width: 36,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -126,12 +133,12 @@ class _VoiceBubbleState extends ConsumerState<VoiceBubble> {
                 color: active
                     ? (widget.isMe ? accent : Colors.white)
                     : onBubble,
-                size: 18),
+                size: 22),
           ),
         ),
       const SizedBox(width: 8),
       SizedBox(
-        width: 76,
+        width: 96,
         child: SliderTheme(
           data: SliderThemeData(
             trackHeight: 3,

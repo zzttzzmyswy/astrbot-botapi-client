@@ -166,7 +166,8 @@ void main() {
           ),
         ),
       ));
-      await t.pumpAndSettle();
+      // 流式气泡带常驻呼吸光标（无限动画），不能 pumpAndSettle。
+      await t.pump(const Duration(milliseconds: 300));
       expect(find.byType(fmath.Math), findsOneWidget);
       expect(t.takeException(), isNull);
     });

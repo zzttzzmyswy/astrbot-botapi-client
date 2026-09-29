@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../design/tokens.dart';
 import '../../../models/message.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../util/mime.dart';
@@ -23,24 +24,24 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
 
   void _retry() {
     ref.read(chatProvider.notifier).retryMediaSend(
-        (widget.m.createdAt as int),
-        (widget.m.msgType as String),
-        (widget.m.localPath as String?),
-        (widget.m.content as String?));
+        widget.m.createdAt,
+        widget.m.msgType,
+        widget.m.localPath,
+        widget.m.content);
   }
 
   Future<void> _open() async {
-    final name = (widget.m.content as String?) ?? 'file';
+    final name = widget.m.content ?? 'file';
     setState(() => _downloading = true);
     try {
       File? src;
-      final lp = (widget.m.localPath as String?) ?? '';
+      final lp = widget.m.localPath ?? '';
       if (lp.isNotEmpty && File(lp).existsSync()) {
         src = File(lp);
       }
       if (src == null || !await src.exists()) {
         // 本地无缓存 → 按 URL 下载
-        final url = (widget.m.attachmentId as String?) ?? '';
+        final url = widget.m.attachmentId ?? '';
         if (url.isNotEmpty) {
           final path =
               await ref.read(chatProvider.notifier).downloadMedia(url);
@@ -63,7 +64,7 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text('打开失败: $e'),
-              backgroundColor: Colors.redAccent),
+              backgroundColor: AppColors.of(context).error),
         );
       }
     } finally {
@@ -74,20 +75,24 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
   @override
   Widget build(BuildContext context) {
     final fg = widget.fg;
-    final name = (widget.m.content as String?) ?? '文件';
+    final name = widget.m.content ?? '文件';
     final uploading =
-        (widget.m.status as MessageStatus?) == MessageStatus.uploading;
+        widget.m.status == MessageStatus.uploading;
     final errored =
-        (widget.m.status as MessageStatus?) == MessageStatus.error;
-    final prog = (widget.m.uploadProgress as double?) ?? 0;
-    final accent = const Color(0xFF5B4BD6);
+        widget.m.status == MessageStatus.error;
+    final prog = widget.m.uploadProgress ?? 0;
+    final c = AppColors.of(context);
+    final accent = c.primary;
     final onBubble = widget.isMe ? Colors.white : accent;
+    final ext = name.contains('.')
+        ? name.split('.').last.toUpperCase()
+        : '';
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: uploading ? null : (errored ? _retry : _open),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 220),
+        constraints: const BoxConstraints(maxWidth: 240),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -97,15 +102,15 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 34,
-                      height: 34,
+                      width: 42,
+                      height: 42,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                           color: errored
-                              ? Colors.redAccent.withValues(alpha: 0.15)
+                              ? c.error.withValues(alpha: 0.15)
                               : onBubble.withValues(
                                   alpha: widget.isMe ? 0.25 : 0.12),
-                          borderRadius: BorderRadius.circular(8)),
+                          borderRadius: BorderRadius.circular(12)),
                       child: uploading
                           ? SizedBox(
                               width: 16,
@@ -123,14 +128,19 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
                                       strokeWidth: 2,
                                       valueColor: AlwaysStoppedAnimation<Color>(
                                           onBubble.withValues(alpha: 0.8))))
-                              : Icon(
-                                  errored
-                                      ? Icons.refresh_rounded
-                                      : Icons.description_rounded,
-                                  color: errored
-                                      ? Colors.redAccent
-                                      : onBubble,
-                                  size: 18)),
+                              : (errored || ext.isEmpty || ext.length > 4
+                                  ? Icon(
+                                      errored
+                                          ? Icons.refresh_rounded
+                                          : Icons.description_rounded,
+                                      color: errored ? c.error : onBubble,
+                                      size: 20)
+                                  : Text(ext,
+                                      style: TextStyle(
+                                          color: onBubble,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.3)))),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -142,23 +152,24 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
                           Text(name,
                               style: TextStyle(
                                   color: fg,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500),
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w600),
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis),
-                          const SizedBox(height: 1),
+                          const SizedBox(height: 2),
                           Text(
                               uploading
                                   ? '上传中 ${(prog * 100).round()}%'
                                   : (errored
-                                      ? '发送失败,点击重试'
+                                      ? '发送失败，点击重试'
                                       : (_downloading
                                           ? '下载中…'
-                                          : '点击打开')),
+                                          : '点击打开 / 分享')),
                               style: TextStyle(
                                   color: errored
-                                      ? Colors.redAccent
-                                      : fg.withValues(alpha: 0.55),
-                                  fontSize: 11)),
+                                      ? c.error
+                                      : fg.withValues(alpha: 0.6),
+                                  fontSize: 12)),
                         ])),
                     if (!uploading)
                       Icon(Icons.chevron_right_rounded,
@@ -173,7 +184,7 @@ class _FileBubbleState extends ConsumerState<FileBubble> {
                     minHeight: 3,
                     backgroundColor: fg.withValues(alpha: 0.2),
                     valueColor:
-                        AlwaysStoppedAnimation<Color>(accent),
+                        AlwaysStoppedAnimation<Color>(onBubble),
                   ),
                 ),
               ],
