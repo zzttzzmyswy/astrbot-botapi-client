@@ -234,6 +234,20 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
     }
   }
 
+  // 本地消息时间戳：严格单调递增的毫秒值。
+  //
+  // created_at 同时是本地库 upsert 的匹配键（CacheService.upsert 按
+  // created_at + 分区查找）与内存里定位消息的键。服务端一次回复连推多张图 /
+  // 图 + 文件 + 语音时，事件在同一毫秒内被处理，旧实现直接取
+  // DateTime.now()，几条消息撞同一 created_at：库里后写覆盖先写，重启后只剩
+  // 一条且 attachment/localPath 错位。这里保证每次取值都比上次大。
+  int _lastTs = 0;
+  int _nextTs() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _lastTs = now > _lastTs ? now : _lastTs + 1;
+    return _lastTs;
+  }
+
   void attachPlayback(AudioPlaybackNotifier p) => _playback = p;
 
   /// 构造 SSE 客户端（测试可覆写注入假实现）。生产用真实 [BotApiClient]。
@@ -355,10 +369,15 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       await _resetOutboundState();
       final acc = _currentAccount;
       if (acc == null) {
+        // 无账户（含删掉最后一个账户）：清掉上一账户残留的消息与会话，
+        // 否则顶栏仍显示旧会话名、列表仍显示已删账户的消息。
         state = state.copyWith(
             connectionState: ConnState.disconnected,
-            errorMessage: '未添加账户，请点击左上角菜单添加');
-        _syncAccountState();
+            errorMessage: '未添加账户，请点击左上角菜单添加',
+            sessions: const [],
+            currentSessionId: kDefaultSessionId,
+            sessionsError: null);
+        _syncAccountState(messages: const []);
         return;
       }
       // 会话权威列表：先拉全量（fetchSessions 不需要 session_id），写镜像，
@@ -473,7 +492,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   }
 
   void sendText(String text) {
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _nextTs();
     final localMsg = LocalMessage(
       msgType: 'text',
       content: text,
@@ -500,6 +519,8 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
       return;
     }
     if (text != null) _inflightTextCreatedAt = createdAt;
+    // 回调异步返回时会话可能已切换，落库须写回发送时的分区。
+    final partitionKey = _cacheKey;
     http.sendMessage(text: text, fileIds: fileIds).then((mid) {
       if (!mounted) return;
       if (mid == null) {
@@ -508,17 +529,23 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         state = state.copyWith(messages: msgs, errorMessage: '发送失败');
         for (final m in msgs) {
           if (m.createdAt == createdAt && m.isFromMe) {
-            _cache.upsert(m, accountId: _cacheKey);
+            _cache.upsert(m, accountId: partitionKey);
           }
         }
       } else {
-        // 成功：标 sent
-        state = state.copyWith(
-            messages: state.messages
-                .map((m) => (m.createdAt == createdAt && m.isFromMe)
-                    ? m.copyWith(status: MessageStatus.sent)
-                    : m)
-                .toList());
+        // 成功：标 sent，并落库（旧实现只改内存，库里一直是 pending，
+        // 重启/切会话后重新读出的消息状态与实际不符）。
+        final msgs = state.messages
+            .map((m) => (m.createdAt == createdAt && m.isFromMe)
+                ? m.copyWith(status: MessageStatus.sent)
+                : m)
+            .toList();
+        state = state.copyWith(messages: msgs);
+        for (final m in msgs) {
+          if (m.createdAt == createdAt && m.isFromMe) {
+            _cache.upsert(m, accountId: partitionKey);
+          }
+        }
         // 用户文本消息贴 server_id 在下次 connect 的 history 合并时完成。
         if (text != null) _inflightTextCreatedAt = null;
       }
@@ -538,7 +565,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   // ── 媒体发送 ──
 
   int createPendingMedia({required String msgType, String? localPath, String? content}) {
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _nextTs();
     final msg = LocalMessage(
       msgType: msgType,
       content: content,
@@ -623,9 +650,10 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         mime = 'image/jpeg';
         break;
       default:
-        mime = (content != null && content.toLowerCase().endsWith('.pdf'))
-            ? 'application/pdf'
-            : 'application/octet-stream';
+        // 与首次发送（AttachmentPanel 按原文件名推断）保持一致；旧实现只认
+        // .pdf，其余一律 octet-stream，导致重试后服务端把图片/音频文件当普通
+        // 文件处理，与首发结果不一致。
+        mime = mimeForExtension(content ?? localPath);
     }
     final r = await uploadMedia(file, mime, onProgress: (s, t) {
       updateUploadProgress(createdAt, t > 0 ? s / t : 0);
@@ -640,7 +668,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
   // ── 事件处理 ──
 
   Future<void> _handleEvent(BotApiEvent event) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _nextTs();
 
     if (event.isPing) return;
 
@@ -883,7 +911,7 @@ class ChatNotifier extends StateNotifier<ChatState> with WidgetsBindingObserver 
         (thinking == null || thinking.trim().isEmpty)) {
       return;
     }
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _nextTs();
     final list = [...state.messages];
     if (thinking != null && thinking.trim().isNotEmpty) {
       final thinkMsg = LocalMessage(
