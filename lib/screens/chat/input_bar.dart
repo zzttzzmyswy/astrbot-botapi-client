@@ -123,8 +123,11 @@ class ChatInputBar extends StatelessWidget {
                             onVoiceMove(d.localPosition.dy),
                         onLongPressEnd: (_) => onVoiceEnd(),
                         onLongPressCancel: onVoiceCancel,
-                        child: Tooltip(
-                          message: '按住说话',
+                        // 不能用 Tooltip：它自带长按识别器，会抢赢手势竞技场，
+                        // 只弹提示而不触发 onLongPressStart（录音失效）。
+                        child: Semantics(
+                          label: '按住说话',
+                          button: true,
                           child: Container(
                             width: 44,
                             height: 44,
